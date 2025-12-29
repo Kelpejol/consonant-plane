@@ -1,0 +1,133 @@
+// This is your Prisma schema file
+// Learn more: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../src/generated/prisma"
+}
+
+// ⚠️ DO NOT CHANGE THIS LINE MANUALLY
+// Managed by scripts/syncPrismaProvider.ts
+datasource db {
+  provider = "sqlite"
+}
+
+model Cluster {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  namespace   String
+  tokenHash   String
+  status      ClusterStatus @default(PENDING)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  lastSeenAt  DateTime?
+  
+  kagentVersion String?
+  kagentConfig  Json?
+  
+  socketId    String?  @unique
+  
+  events      Event[]
+  agentRuns   AgentRun[]
+  
+  @@index([status])
+  @@index([lastSeenAt])
+  @@map("clusters")
+}
+
+enum ClusterStatus {
+  PENDING
+  ACTIVE
+  INACTIVE
+  FAILED
+}
+
+model Event {
+  id          String   @id @default(cuid())
+  clusterId   String
+  type        EventType
+  payload     Json
+  receivedAt  DateTime @default(now())
+  
+  cluster     Cluster  @relation(fields: [clusterId], references: [id], onDelete: Cascade)
+  
+  @@index([clusterId, receivedAt(sort: Desc)])
+  @@index([type, receivedAt(sort: Desc)])
+  @@map("events")
+}
+
+enum EventType {
+  CLUSTER_ERROR
+  AGENT_TRACE
+  AGENT_EVENT
+  K8S_EVENT
+  K8S_POD_STATUS
+  OTEL_TRACE
+  OTEL_METRIC
+  INVOKE_RESPONSE
+  INVOKE_ERROR
+}
+
+model AgentRun {
+  id          String   @id @default(cuid())
+  clusterId   String
+  agentName   String
+  requestId   String   @unique
+  input       Json
+  parameters  Json?
+  status      AgentRunStatus @default(PENDING)
+  result      Json?
+  error       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  completedAt DateTime?
+  
+  cluster     Cluster  @relation(fields: [clusterId], references: [id], onDelete: Cascade)
+  
+  @@index([clusterId, status])
+  @@index([requestId])
+  @@index([status, createdAt(sort: Desc)])
+  @@map("agent_runs")
+}
+
+enum AgentRunStatus {
+  PENDING
+  RUNNING
+  COMPLETED
+  FAILED
+  TIMEOUT
+}
+
+model Job {
+  id          String   @id @default(cuid())
+  type        JobType
+  payload     Json
+  status      JobStatus @default(PENDING)
+  attempts    Int      @default(0)
+  maxAttempts Int      @default(3)
+  error       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  scheduledFor DateTime?
+  startedAt   DateTime?
+  completedAt DateTime?
+  
+  @@index([status, scheduledFor])
+  @@index([type, status])
+  @@map("jobs")
+}
+
+enum JobType {
+  CLUSTER_REGISTRATION
+  AGENT_INVOCATION
+  CLUSTER_HEALTH_CHECK
+  EVENT_CLEANUP
+}
+
+enum JobStatus {
+  PENDING
+  RUNNING
+  COMPLETED
+  FAILED
+  RETRYING
+}
