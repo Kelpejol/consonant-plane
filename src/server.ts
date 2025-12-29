@@ -629,10 +629,10 @@ const start = async () => {
     await setupServices();
     await setupPlugins(app);
 
-    const httpServer = createServer(app.server);
+ await app.ready();
 
     socketManager = new SocketManager(app.log);
-    socketManager.initialize(httpServer, {
+    socketManager.initialize(app.server, {
       path: '/socket',
       cors: {
         origin: process.env.CORS_ORIGIN || '*',
@@ -642,6 +642,12 @@ const start = async () => {
       pingInterval: 25000,
       transports: ['websocket']
     });
+
+     await app.listen({
+      port: PORT,
+      host: HOST,
+    });
+
 
     // setupSocketHandlers();
 
@@ -654,15 +660,9 @@ const start = async () => {
     //   }
     // }, 60000);
 
-    await new Promise<void>((resolve, reject) => {
-      httpServer.listen(PORT, HOST, (err?: Error) => {
-        if (err) reject(err);
-        else {
-          app.log.info({ port: PORT, host: HOST }, 'Server started');
-          resolve();
-        }
-      });
-    });
+    
+
+    app.log.info({ port: PORT }, 'Server started');
   } catch (err) {
     app.log.error(err);
     process.exit(1);
