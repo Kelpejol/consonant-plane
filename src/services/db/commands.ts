@@ -1,6 +1,6 @@
 // src/db/commands.ts
 import { spawn } from 'child_process';
-import { logger } from '../utils/logger.js';
+import { logger } from "../../utils/logger.js";
 
 export interface CommandResult {
   success: boolean;
@@ -75,7 +75,7 @@ export async function runPrismaCommand(
       };
 
       if (code === 0) {
-        logger.success(`[Prisma CLI] ✓ Command completed successfully`);
+        logger.info(`[Prisma CLI] ✓ Command completed successfully`);
       } else {
         logger.error(`[Prisma CLI] Command failed with exit code ${code}`);
       }

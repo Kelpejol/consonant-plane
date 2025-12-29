@@ -1,9 +1,12 @@
 // src/db/manager.ts
-import { PrismaClient } from '../generated/prisma/client.js';
+// manager.ts
+import { PrismaClient } from '@prisma/client';
 import { Mutex } from 'async-mutex';
 import { createAdapter } from './adapter.js';
 import { connectWithRetry, disconnect } from './connection.js';
-import { logger } from '../utils/logger.js';
+import { logger } from "../../utils/logger.js";
+
+
 
 /**
  * Thread-safe Prisma client manager for production environments.
@@ -71,7 +74,7 @@ class PrismaManager {
       this.currentDatabaseUrl = databaseUrl;
       this.isInitialized = true;
       
-      logger.success('[Prisma Manager] Initialized successfully');
+      logger.info('[Prisma Manager] Initialized successfully');
       logger.info('[Prisma Manager] Configuration immutable - restart to change');
     });
   }
@@ -158,7 +161,7 @@ class PrismaManager {
         this.currentDatabaseUrl = null;
         this.isInitialized = false;
         
-        logger.success('[Prisma Manager] Disconnected successfully');
+        logger.info('[Prisma Manager] Disconnected successfully');
       }
     });
   }
@@ -195,7 +198,7 @@ process.on('uncaughtException', async (error) => {
   process.exit(1);
 });
 
-process.on('unhandledRejection', async (reason) => {
+process.on('unhandledRejection', async (reason: any) => {
   logger.error('[Prisma Manager] Unhandled rejection:', reason);
   await prismaManager.disconnect();
   process.exit(1);

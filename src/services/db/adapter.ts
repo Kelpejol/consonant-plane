@@ -3,7 +3,7 @@ import { PrismaPg } from '@prisma/adapter-pg';
 import { PrismaMariaDb } from '@prisma/adapter-mariadb';
 import { PrismaBetterSqlite3 } from '@prisma/adapter-better-sqlite3';
 import { detectProvider, DbConfig } from './config.js';
-import { logger } from '../utils/logger.js';
+import { logger } from '../../utils/logger.js';
 
 /**
  * Creates the appropriate database adapter based on the DATABASE_URL.

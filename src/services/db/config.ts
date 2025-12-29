@@ -1,5 +1,5 @@
 // src/db/config.ts
-import { logger } from '../utils/logger.js';
+import { logger } from "../../utils/logger.js";
 import { config } from 'dotenv';
 import { URL } from 'url';
 
@@ -128,5 +128,5 @@ export function validateDbConfig(config: DbConfig): void {
     }
   }
   
-  logger.success(`[DB Config] Validated configuration for ${config.provider}`);
+  logger.info(`[DB Config] Validated configuration for ${config.provider}`);
 }

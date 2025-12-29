@@ -7,6 +7,7 @@ import closeWithGrace from 'close-with-grace';
 import { createServer } from 'http';
 import { SocketManager } from './services/socket/index.js';
 import { prismaManager } from './services/db/manager.js';
+import dbPlugin from './services/db/dbPlugin.js'
 // import { RedisService } from './redis-service';
 // import { QueueService, QueueName } from './queue-service';
 import { randomBytes } from 'crypto';
@@ -153,6 +154,9 @@ const setupPlugins = async (server: FastifyInstance) => {
     credentials: true 
   });
   await server.register(compress);
+
+  // Register the plugin
+await server.register(dbPlugin);
   
 //   await server.register(rateLimit, {
 //     max: 100,
@@ -614,7 +618,8 @@ const shutdown = closeWithGrace({ delay: 10000 }, async ({ signal, err }) => {
 //     await db.disconnect();
 //   }
 
-
+ await prismaManager.disconnect();
+  app.log.info('[Server] Shutdown complete');
   
   await app.close();
 });

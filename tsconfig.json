@@ -2,7 +2,8 @@
   "compilerOptions": {
     /* Project Structure and Output */
     "rootDir": "./src",                    // Compile files in src (including generated)
-    "outDir": "./dist",                   // Output compiled files to dist
+    "outDir": "./dist",  
+    "allowJs": true,                 // Output compiled files to dist
     "removeComments": true,               // Strip comments from output
     "sourceMap": true,                    // Generate source maps for debugging
     "declaration": true,                  // Generate .d.ts files for types
@@ -32,11 +33,12 @@
     /* Code Flow and Style Checks */
     "noFallthroughCasesInSwitch": true,   // Prevent unintentional fallthrough in switch statements
     "skipLibCheck": true,                 // Speed up compilation by skipping type checking of declaration files
-    
+     "checkJs": false,
     /* Optional: Cleaner Imports */
     "baseUrl": "./",                      // Root for non-relative module resolution
     "paths": {
-      "@/*": ["src/*"]
+      "@/*": ["src/*"],
+       "@generated/*": ["src/generated/*"]
     }
   },
   "include": [
@@ -44,6 +46,6 @@
   ],
   "exclude": [
     "node_modules",
-    "dist"
+    "dist", 
   ]
 }

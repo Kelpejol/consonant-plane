@@ -1,7 +1,8 @@
 // src/db/connection.ts
-import { PrismaClient } from '../generated/prisma/client.js';
 import { detectProvider } from './config.js';
-import { logger } from '../utils/logger.js';
+import { logger } from "../../utils/logger.js";
+import { PrismaClient } from '@prisma/client';
+
 
 const MAX_RETRIES = 5;
 const INITIAL_DELAY_MS = 1000;
@@ -42,7 +43,7 @@ export async function connectWithRetry(
       // Test the connection with a simple query
       await testConnection(client);
       
-      logger.success(
+      logger.info(
         `[DB Connection] Connected to ${dbConfig.provider}${
           attempt > 0 ? ` after ${attempt} retries` : ''
         }`
@@ -129,7 +130,7 @@ export async function disconnect(client: PrismaClient): Promise<void> {
   try {
     await client.$disconnect();
     logger.info('[DB Connection] Disconnected successfully');
-  } catch (error) {
+  } catch (error: any) {
     logger.error('[DB Connection] Error during disconnect:', error);
     throw error;
   }

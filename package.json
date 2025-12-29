@@ -10,7 +10,7 @@
     "test:watch": "vitest --watch",
     "test:coverage": "vitest --coverage",
     "build": "tsc",
-    "prisma:generate": "prisma generate",
+   "prisma:generate": "prisma generate && echo '{\"type\": \"commonjs\"}' > src/generated/prisma/package.json",
     "prisma:migrate": "prisma migrate dev",
     "prisma:studio": "prisma studio",
     "start": "node dist/server.js",
