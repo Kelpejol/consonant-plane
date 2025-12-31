@@ -1,8 +1,6 @@
 // src/db/adapter.ts
 import { PrismaPg } from '@prisma/adapter-pg';
-import { Pool } from 'pg';
 import { PrismaLibSql } from '@prisma/adapter-libsql';
-import mariadb from 'mariadb';
 import { PrismaMariaDb } from '@prisma/adapter-mariadb';
 import { detectProvider } from './config.js';
 import type { DbConfig, DatabaseAdapter, AppLogger } from './types.js';

@@ -4,6 +4,7 @@ import { Mutex } from 'async-mutex';
 import { createAdapter } from './adapter.js';
 import { connectWithRetry, disconnect } from './connection.js';
 import type { AppLogger } from './types.js';
+import { execSync } from 'child_process';
 
 /**
  * Thread-safe Prisma client manager for production environments.
@@ -13,7 +14,6 @@ import type { AppLogger } from './types.js';
  * - Any env change requires full application restart with SIGTERM
  * - Immutable after initialization
  * - Logger injected once, stored in memory
- * - NO process lifecycle management (handled by server)
  * 
  * **Features:**
  * - ✓ Singleton pattern for single client instance
@@ -21,7 +21,6 @@ import type { AppLogger } from './types.js';
  * - ✓ Connection retry logic
  * - ✓ Active request tracking for graceful shutdown
  * - ✓ Proper logger injection (no globals)
- * - ✗ NO process.on() handlers (these belong in the server)
  * 
  * **Lifecycle:**
  * 1. Server calls `initialize(logger)` at startup
@@ -95,6 +94,17 @@ class PrismaManager {
         logger.info('[Prisma Manager] Already initialized, skipping...');
         return;
       }
+
+      // Auto-sync schema
+    try {
+      logger.info('[Prisma Manager] Syncing schema provider...');
+      execSync('node prisma/sync-provider.js', { 
+        cwd: process.cwd(),
+        stdio: 'inherit' 
+      });
+    } catch (error) {
+      logger.warn('[Prisma Manager] Schema sync failed, continuing...');
+    }
 
       // Validate DATABASE_URL exists
       const databaseUrl = dbUrl || process.env.DATABASE_URL;

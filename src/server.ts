@@ -433,56 +433,7 @@ app.get('/health', async (_request, reply) => {
 // API Routes
 // ============================================================================
 
-// /**
-//  * Create a new cluster
-//  * 
-//  * POST /api/v1/clusters
-//  * Body: { name: string, namespace: string }
-//  */
-// app.post('/api/v1/clusters', async (request, reply) => {
-//   const { name, namespace } = request.body as any;
 
-//   if (!name || !namespace) {
-//     return reply.code(400).send({
-//       success: false,
-//       error: 'Missing required fields: name, namespace',
-//     });
-//   }
-
-//   // Use Prisma client from request or import
-//   const existingCluster = await prisma.cluster.findUnique({
-//     where: { name },
-//   });
-
-//   if (existingCluster) {
-//     return reply.code(409).send({
-//       success: false,
-//       error: 'Cluster with this name already exists',
-//     });
-//   }
-
-//   const tokenHash = randomBytes(64).toString('hex');
-
-//   const cluster = await prisma.cluster.create({
-//     data: {
-//       name,
-//       namespace,
-//       tokenHash,
-//       status: 'PENDING',
-//     },
-//   });
-
-//   return {
-//     success: true,
-//     data: {
-//       id: cluster.id,
-//       name: cluster.name,
-//       namespace: cluster.namespace,
-//       tokenHash: cluster.tokenHash,
-//       status: cluster.status,
-//     },
-//   };
-// });
 
 
 /**
