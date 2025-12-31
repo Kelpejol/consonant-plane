@@ -6,12 +6,11 @@ import compress from '@fastify/compress';
 import closeWithGrace from 'close-with-grace';
 import { createServer } from 'http';
 import { SocketManager } from './services/socket/index.js';
-import { prismaManager } from './services/db/manager.js';
-import dbPlugin from './services/db/dbPlugin.js'
 // import { RedisService } from './redis-service';
 // import { QueueService, QueueName } from './queue-service';
 import { randomBytes } from 'crypto';
 // import { ClusterStatus, EventType, AgentRunStatus } from '@prisma/client';
+import { prismaManager, dbPlugin, prisma } from './services/db/index.js';
 
 const PORT = Number(process.env.PORT) || 3000;
 const HOST = process.env.HOST || '0.0.0.0';
@@ -25,21 +24,44 @@ const REDIS_PASSWORD = process.env.REDIS_PASSWORD;
 const app: FastifyInstance = Fastify({
   logger: {
     level: IS_PROD ? 'info' : 'debug',
-    transport: !IS_PROD ? { target: 'pino-pretty' } : undefined,
+    transport: !IS_PROD
+      ? {
+          target: 'pino-pretty',
+          options: {
+            colorize: true,
+            translateTime: 'HH:MM:ss Z',
+            ignore: 'pid,hostname',
+          },
+        }
+      : undefined,
   },
-  disableRequestLogging: true,
+  disableRequestLogging: false,
   trustProxy: true,
+  requestIdHeader: 'x-request-id',
+  requestIdLogLabel: 'reqId',
 });
 
+// ============================================================================
+// Service Instances
+// ============================================================================
 
 // let redis: RedisService;
 // let queue: QueueService;
 let socketManager: SocketManager;
 
+
+// ============================================================================
+// Service Setup Functions
+// ============================================================================
+
 const setupServices = async () => {
-  app.log.info('[Server] Initializing database...');
-    await prismaManager.initialize();
-    app.log.info('[Server] Database connected');
+ app.log.info('[Server] 🚀 Initializing services...');
+ 
+ // Initialize database
+  app.log.info('[Server] 📊 Connecting to database...');
+  await prismaManager.initialize(app.log);
+  app.log.info('[Server] ✓ Database connected');
+
 
 //   redis = new RedisService(
 //     {
@@ -148,21 +170,34 @@ const setupServices = async () => {
 // };
 
 const setupPlugins = async (server: FastifyInstance) => {
-  await server.register(helmet);
-  await server.register(cors, { 
-    origin: process.env.CORS_ORIGIN || '*',
-    credentials: true 
-  });
-  await server.register(compress);
+  app.log.info('[Server] 🔌 Registering plugins...');
 
-  // Register the plugin
-await server.register(dbPlugin);
+  // Security
+  await server.register(helmet, {
+    contentSecurityPolicy: false, // Disable for development
+  });
+
+  // CORS
+  await server.register(cors, {
+    origin: process.env.CORS_ORIGIN || '*',
+    credentials: true,
+  });
+
+  // Compression
+  await server.register(compress, {
+    global: true,
+    encodings: ['gzip', 'deflate'],
+  });
+
+  // Database plugin
+  await server.register(dbPlugin);
   
 //   await server.register(rateLimit, {
 //     max: 100,
 //     timeWindow: '1 minute',
 //     redis: redis.getClient(),
 //   });
+app.log.info('[Server] ✓ Plugins registered');
 };
 
 // const setupSocketHandlers = () => {
@@ -279,6 +314,10 @@ await server.register(dbPlugin);
 //   });
 // };
 
+// ============================================================================
+// Request Logging Hook
+// ============================================================================
+
 app.addHook('onResponse', (request, reply, done) => {
   request.log.info({
     method: request.method,
@@ -289,154 +328,232 @@ app.addHook('onResponse', (request, reply, done) => {
   done();
 });
 
+// ============================================================================
+// Error Handler
+// ============================================================================
+
 app.setErrorHandler((error: any, request, reply) => {
   request.log.error(error);
+
   const statusCode = error.statusCode || 500;
-  reply.status(statusCode).send({
+  const errorResponse = {
     success: false,
     error: IS_PROD ? 'Internal Server Error' : error.name,
     message: error.message,
-  });
+    ...(IS_PROD ? {} : { stack: error.stack }),
+  };
+
+  reply.status(statusCode).send(errorResponse);
 });
 
-app.get('/health', async () => {
-  try{
-  const hasDatabase = !!process.env.DATABASE_URL;
-  let dbConnected = false;
-    if (hasDatabase ) {
+// ============================================================================
+// Error Handler
+// ============================================================================
+
+app.setErrorHandler((error: any, request, reply) => {
+  request.log.error(error);
+
+  const statusCode = error.statusCode || 500;
+  const errorResponse = {
+    success: false,
+    error: IS_PROD ? 'Internal Server Error' : error.name,
+    message: error.message,
+    ...(IS_PROD ? {} : { stack: error.stack }),
+  };
+
+  reply.status(statusCode).send(errorResponse);
+});
+
+// ============================================================================
+// Health Check Routes
+// ============================================================================
+
+/**
+ * Main health check endpoint
+ * 
+ * Returns overall application health status including:
+ * - Database connectivity
+ * - Active request count
+ * - Service status
+ */
+app.get('/health', async (_request, reply) => {
+  try {
+    const hasDatabase = !!process.env.DATABASE_URL;
+    let dbConnected = false;
+
+    // Check database connectivity
+    if (hasDatabase) {
       try {
-        const prisma = await prismaManager.getClient();
-        await prisma.$queryRaw`SELECT 1`;
+        const client = await prismaManager.getClient();
+        await client.$queryRaw`SELECT 1`;
         dbConnected = true;
-      } catch {
+      } catch (error) {
+        app.log.warn({error}, '[Health Check] Database connection check failed');
         dbConnected = false;
       }
     }
 
-  const status = hasDatabase  && dbConnected ? 'healthy' : 'initializing';
+    const status = hasDatabase && dbConnected ? 'healthy' : 'initializing';
 
-  return {
-    status,
-    services: {
-      database: dbConnected ? 'connected' : 'not initialized',
-    },
-    timestamp: new Date().toISOString(),
-    activeRequests: prismaManager.getActiveRequestCount(),
-  };
-}
- catch (error) {
     return {
+      status,
+      services: {
+        database: dbConnected ? 'connected' : hasDatabase ? 'error' : 'not configured',
+        // redis: redis ? 'connected' : 'not configured',
+        // queue: queue ? 'connected' : 'not configured',
+      },
+      timestamp: new Date().toISOString(),
+      activeRequests: prismaManager.getActiveRequestCount(),
+      uptime: process.uptime(),
+    };
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    app.log.error({error}, '[Health Check] Health check failed');
+
+    return reply.status(503).send({
       status: 'unhealthy',
       services: {
-      database: 'error',
-       },
-      error: error instanceof Error ? error.message : 'Unknown error',
-    };
+        database: 'error',
+      },
+      error: errorMessage,
+      timestamp: new Date().toISOString(),
+    });
   }
 });
 
-// app.post('/api/v1/clusters', async (request, reply) => {
-//   const { name, namespace } = request.body as any;
+// ============================================================================
+// API Routes
+// ============================================================================
 
-//   if (!name || !namespace) {
-//     return reply.code(400).send({
-//       success: false,
-//       error: 'Missing required fields: name, namespace'
-//     });
-//   }
+/**
+ * Create a new cluster
+ * 
+ * POST /api/v1/clusters
+ * Body: { name: string, namespace: string }
+ */
+app.post('/api/v1/clusters', async (request, reply) => {
+  const { name, namespace } = request.body as any;
 
-//   const existing = await db.getClusterByName(name);
-//   if (existing) {
-//     return reply.code(409).send({
-//       success: false,
-//       error: 'Cluster with this name already exists'
-//     });
-//   }
+  if (!name || !namespace) {
+    return reply.code(400).send({
+      success: false,
+      error: 'Missing required fields: name, namespace',
+    });
+  }
 
-//   const token = randomBytes(64).toString('hex');
-//   const cluster = await db.createCluster(name, namespace, token);
+  // Use Prisma client from request or import
+  const existingCluster = await prisma.cluster.findUnique({
+    where: { name },
+  });
 
-//   return {
-//     success: true,
-//     data: {
-//       id: cluster.id,
-//       name: cluster.name,
-//       namespace: cluster.namespace,
-//       token: cluster.token,
-//       status: cluster.status
-//     }
-//   };
-// });
+  if (existingCluster) {
+    return reply.code(409).send({
+      success: false,
+      error: 'Cluster with this name already exists',
+    });
+  }
 
-// app.get('/api/v1/clusters', async () => {
-//   let clusters = await redis.get('clusters:all');
-  
-//   if (!clusters) {
-//     clusters = await db.getAllClusters();
-//     await redis.set('clusters:all', clusters, 60);
-//   }
+  const tokenHash = randomBytes(64).toString('hex');
 
-//   const enriched = await Promise.all(
-//     clusters.map(async (c: any) => ({
-//       ...c,
-//       connected: socketManager.isClusterConnected(c.id),
-//       stats: await db.getClusterStats(c.id),
-//     }))
-//   );
+  const cluster = await prisma.cluster.create({
+    data: {
+      name,
+      namespace,
+      tokenHash,
+      status: 'PENDING',
+    },
+  });
 
-//   return {
-//     success: true,
-//     data: enriched
-//   };
-// });
+  return {
+    success: true,
+    data: {
+      id: cluster.id,
+      name: cluster.name,
+      namespace: cluster.namespace,
+      tokenHash: cluster.tokenHash,
+      status: cluster.status,
+    },
+  };
+});
 
-// app.get('/api/v1/clusters/:id', async (request, reply) => {
-//   const { id } = request.params as any;
-  
-//   let cluster = await redis.getCachedCluster(id);
-  
-//   if (!cluster) {
-//     cluster = await db.getCluster(id);
-//     if (cluster) {
-//       await redis.cacheCluster(id, cluster);
-//     }
-//   }
 
-//   if (!cluster) {
-//     return reply.code(404).send({
-//       success: false,
-//       error: 'Cluster not found'
-//     });
-//   }
+/**
+ * Get all clusters
+ * 
+ * GET /api/v1/clusters
+ */
+app.get('/api/v1/clusters', async (_request) => {
+  const clusters = await prisma.cluster.findMany({
+    select: {
+      id: true,
+      name: true,
+      namespace: true,
+      status: true,
+      createdAt: true,
+      updatedAt: true,
+    },
+  });
 
-//   const stats = await db.getClusterStats(id);
+  return {
+    success: true,
+    data: clusters,
+  };
+});
 
-//   return {
-//     success: true,
-//     data: {
-//       ...cluster,
-//       tokenHash: undefined,
-//       connected: socketManager.isClusterConnected(id),
-//       stats,
-//     }
-//   };
-// });
+/**
+ * Get cluster by ID
+ * 
+ * GET /api/v1/clusters/:id
+ */
+app.get<{ Params: { id: string } }>('/api/v1/clusters/:id', async (request, reply) => {
+  const { id } = request.params;
 
-// app.delete('/api/v1/clusters/:id', async (request, reply) => {
-//   const { id } = request.params as any;
-  
-//   try {
-//     await db.deleteCluster(id);
-//     await redis.invalidateCluster(id);
-//     await redis.removeActiveConnection(id);
-//     return { success: true };
-//   } catch (error) {
-//     return reply.code(404).send({
-//       success: false,
-//       error: 'Cluster not found'
-//     });
-//   }
-// });
+  const cluster = await prisma.cluster.findUnique({
+    where: { id },
+    select: {
+      id: true,
+      name: true,
+      namespace: true,
+      status: true,
+      createdAt: true,
+      updatedAt: true,
+    },
+  });
+
+  if (!cluster) {
+    return reply.code(404).send({
+      success: false,
+      error: 'Cluster not found',
+    });
+  }
+
+  return {
+    success: true,
+    data: cluster,
+  };
+});
+
+/**
+ * Delete cluster by ID
+ * 
+ * DELETE /api/v1/clusters/:id
+ */
+app.delete<{ Params: { id: string } }>('/api/v1/clusters/:id', async (request, reply) => {
+  const { id } = request.params;
+
+  try {
+    await prisma.cluster.delete({
+      where: { id },
+    });
+
+    return { success: true };
+  } catch (error) {
+    return reply.code(404).send({
+      success: false,
+      error: 'Cluster not found',
+    });
+  }
+});
 
 // app.get('/api/v1/clusters/:id/events', async (request, reply) => {
 //   const { id } = request.params as any;
@@ -597,76 +714,115 @@ app.get('/health', async () => {
 //     });
 //   }
 // });
+// ============================================================================
+// Graceful Shutdown Handler
+// ============================================================================
 
-const shutdown = closeWithGrace({ delay: 10000 }, async ({ signal, err }) => {
-  if (err) app.log.error(err);
-  app.log.info(`[${signal}] Closing server...`);
-  
-//   if (socketManager) {
-//     await socketManager.shutdown();
-//   }
-  
-//   if (queue) {
-//     await queue.shutdown();
-//   }
-  
-//   if (redis) {
-//     await redis.disconnect();
-//   }
-  
-//   if (db) {
-//     await db.disconnect();
-//   }
+/**
+ * Graceful shutdown handler.
+ * 
+ * **This is where ALL process signal handling happens.**
+ * The database manager does NOT handle signals - only the server does.
+ * 
+ * Cleanup order:
+ * 1. Close Fastify server (stop accepting new requests)
+ * 2. Shutdown socket manager
+ * 3. Shutdown queue workers
+ * 4. Disconnect Redis
+ * 5. Disconnect database (waits for active requests)
+ */
+const gracefulShutdown = closeWithGrace({ delay: 10000 }, async ({ signal, err }) => {
+  if (err) {
+    app.log.error({err}, '[Shutdown] Error triggered shutdown');
+  }
 
- await prismaManager.disconnect();
-  app.log.info('[Server] Shutdown complete');
-  
+  app.log.info(`[Shutdown] 🛑 Received ${signal}, shutting down gracefully...`);
+
+  // 1. Close socket connections
+  if (socketManager) {
+    app.log.info('[Shutdown] Closing socket connections...');
+    await socketManager.shutdown();
+    app.log.info('[Shutdown] ✓ Socket connections closed');
+  }
+
+  // 2. Shutdown queue workers (commented out until implemented)
+  // if (queue) {
+  //   app.log.info('[Shutdown] Shutting down queue workers...');
+  //   await queue.shutdown();
+  //   app.log.info('[Shutdown] ✓ Queue workers stopped');
+  // }
+
+  // 3. Disconnect Redis (commented out until implemented)
+  // if (redis) {
+  //   app.log.info('[Shutdown] Disconnecting Redis...');
+  //   await redis.disconnect();
+  //   app.log.info('[Shutdown] ✓ Redis disconnected');
+  // }
+
+  // 4. Disconnect database (waits for active requests)
+  app.log.info('[Shutdown] Disconnecting database...');
+  await prismaManager.disconnect();
+  app.log.info('[Shutdown] ✓ Database disconnected');
+
+  // 5. Close Fastify server
+  app.log.info('[Shutdown] Closing Fastify server...');
   await app.close();
+  app.log.info('[Shutdown] ✓ Server closed');
+
+  app.log.info('[Shutdown] 🎉 Shutdown complete');
 });
 
-const start = async () => {
+// ============================================================================
+// Server Startup
+// ============================================================================
+
+/**
+ * Start the server
+ */
+async function start(): Promise<void> {
   try {
+    // 1. Setup services
     await setupServices();
+
+    // 2. Setup plugins
     await setupPlugins(app);
 
- await app.ready();
+    // 3. Wait for Fastify to be ready
+    await app.ready();
 
+    // 4. Initialize Socket.IO
     socketManager = new SocketManager(app.log);
     socketManager.initialize(app.server, {
       path: '/socket',
       cors: {
         origin: process.env.CORS_ORIGIN || '*',
-        credentials: true
+        credentials: true,
       },
       pingTimeout: 60000,
       pingInterval: 25000,
-      transports: ['websocket']
+      transports: ['websocket', 'polling'],
     });
 
-     await app.listen({
+    // 5. Start listening
+    await app.listen({
       port: PORT,
       host: HOST,
     });
 
-
-    // setupSocketHandlers();
-
-    // await queue.addEventCleanupJob({ daysToKeep: 30 });
-
-    // setInterval(async () => {
-    //   const inactiveClusters = await db.getInactiveClusters(10);
-    //   for (const cluster of inactiveClusters) {
-    //     await queue.addClusterHealthCheckJob({ clusterId: cluster.id });
-    //   }
-    // }, 60000);
-
-    
-
-    app.log.info({ port: PORT }, 'Server started');
+    app.log.info(`[Server] 🚀 Server started successfully`);
+    app.log.info(`[Server] 📡 Listening on http://${HOST}:${PORT}`);
+    app.log.info(`[Server] 🔌 Socket.IO available at http://${HOST}:${PORT}/socket`);
+    app.log.info(`[Server] 🏥 Health check at http://${HOST}:${PORT}/health`);
+    app.log.info(`[Server] 📊 Database health at http://${HOST}:${PORT}/health/db`);
   } catch (err) {
-    app.log.error(err);
+    app.log.error({err}, '[Server] ❌ Failed to start server');
     process.exit(1);
   }
-};
+}
+
+// ============================================================================
+// Start Application
+// ============================================================================
 
 start();
+

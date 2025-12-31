@@ -1,130 +1,234 @@
 // src/db/manager.ts
-// manager.ts
 import { PrismaClient } from '@prisma/client';
 import { Mutex } from 'async-mutex';
 import { createAdapter } from './adapter.js';
 import { connectWithRetry, disconnect } from './connection.js';
-import { logger } from "../../utils/logger.js";
-
-
+import type { AppLogger } from './types.js';
 
 /**
  * Thread-safe Prisma client manager for production environments.
  * 
- * DESIGN PRINCIPLES:
+ * **Design Principles:**
  * - DATABASE_URL read once at startup
- * - Any env change requires full restart with SIGTERM
+ * - Any env change requires full application restart with SIGTERM
  * - Immutable after initialization
+ * - Logger injected once, stored in memory
+ * - NO process lifecycle management (handled by server)
  * 
- * Features:
- * - Singleton pattern for single client instance
- * - Thread-safe operations using mutex
- * - Connection retry logic
- * - Active request tracking for graceful shutdown
+ * **Features:**
+ * - ✓ Singleton pattern for single client instance
+ * - ✓ Thread-safe operations using mutex
+ * - ✓ Connection retry logic
+ * - ✓ Active request tracking for graceful shutdown
+ * - ✓ Proper logger injection (no globals)
+ * - ✗ NO process.on() handlers (these belong in the server)
+ * 
+ * **Lifecycle:**
+ * 1. Server calls `initialize(logger)` at startup
+ * 2. Manager creates client, connects, stores in memory
+ * 3. Requests use `getClient()` to access the same instance
+ * 4. Server calls `disconnect()` during shutdown
+ * 
+ * @example
+ * ```typescript
+ * // In server startup:
+ * await prismaManager.initialize(app.log);
+ * 
+ * // In routes/services:
+ * const client = await prismaManager.getClient();
+ * const users = await client.user.findMany();
+ * 
+ * // In server shutdown:
+ * await prismaManager.disconnect();
+ * ```
  */
-
-//all this should be in memory
 class PrismaManager {
+  
+  /** Singleton Prisma client instance (null until initialized) */
   private client: PrismaClient | null = null;
+
+  /** Current DATABASE_URL (stored at initialization, read-only) */
   private currentDatabaseUrl: string | null = null;
+
+  /** Mutex for thread-safe operations */
   private mutex = new Mutex();
+
+  /** Counter for active requests (for graceful shutdown) */
   private activeRequests = 0;
+
+  /** Flag indicating if manager has been initialized */
   private isInitialized = false;
 
-  constructor() {
-    logger.info('[Prisma Manager] Initializing manager');
-  }
+  /** Logger instance (injected once at initialization) */
+  private logger: AppLogger | null = null;
+
 
   /**
    * Initialize the Prisma client with the current DATABASE_URL.
-   * This must be called after database initialization (migrations/push).
    * 
-   * IMPORTANT: This can only be called ONCE. Any DATABASE_URL change
+   * **IMPORTANT:** This can only be called ONCE. Any DATABASE_URL change
    * requires a full application restart.
+   * 
+   * **What it does:**
+   * 1. Validates DATABASE_URL is set
+   * 2. Creates database adapter for detected provider
+   * 3. Creates Prisma client with adapter
+   * 4. Connects with retry logic
+   * 5. Stores client and URL in memory
+   * 6. Marks as initialized (immutable)
+   * 
+   * @param logger - Fastify logger instance (required)
+   * @throws {Error} If DATABASE_URL is not set or connection fails
+   * @throws {Error} If already initialized
+   * 
+   * @example
+   * ```typescript
+   * // In server.ts:
+   * await prismaManager.initialize(app.log);
+   * app.log.info('Database ready');
+   * ```
    */
-  async initialize(): Promise<void> {
+  async initialize(logger: AppLogger, dbUrl?: string): Promise<void> {
     return this.mutex.runExclusive(async () => {
+      // Prevent re-initialization
       if (this.isInitialized) {
-        logger.info('[Prisma Manager] Already initialized');
+        logger.info('[Prisma Manager] Already initialized, skipping...');
         return;
       }
 
-      const databaseUrl = process.env.DATABASE_URL;
+      // Validate DATABASE_URL exists
+      const databaseUrl = dbUrl || process.env.DATABASE_URL;
       if (!databaseUrl) {
         throw new Error(
-          '[Prisma Manager] DATABASE_URL not set. Please set it before initializing.'
+          '[Prisma Manager] ❌ DATABASE_URL not set. Please set it before initializing.'
         );
       }
 
-      logger.info('[Prisma Manager] Initializing client...');
-      
+      // Store logger for lifetime of manager
+      this.logger = logger;
 
-      const adapter = createAdapter();
-      const client = new PrismaClient({ adapter });
-       
-      const result = await connectWithRetry(client);
-      
+      logger.info('[Prisma Manager] Initializing client...');
+
+      // Create adapter for detected database provider
+      const adapter = createAdapter(logger);
+
+      // Create Prisma client with adapter
+      const client = new PrismaClient({
+        adapter,
+        log: [
+          { level: 'query', emit: 'event' },
+          { level: 'error', emit: 'event' },
+          { level: 'warn', emit: 'event' },
+        ],
+      });
+
+      // Wire up Prisma logs to our logger
+      this.wireLogging(client, logger);
+
+      // Connect with retry logic
+      const result = await connectWithRetry(client, logger);
+
       if (!result.success) {
         await client.$disconnect();
         throw new Error(
-          `[Prisma Manager] Failed to connect: ${result.error}`
+          `[Prisma Manager] ❌ Failed to connect: ${result.error}`
         );
       }
+
+      // Store client and URL (immutable from this point)
       this.client = client;
       this.currentDatabaseUrl = databaseUrl;
       this.isInitialized = true;
-      
-      logger.info('[Prisma Manager] Initialized successfully');
-      logger.info('[Prisma Manager] Configuration immutable - restart to change');
+
+      logger.info('[Prisma Manager] ✓ Initialized successfully');
+      logger.info('[Prisma Manager] Configuration is now immutable - restart required to change DATABASE_URL');
+    });
+  }
+
+  /**
+   * Wire Prisma's internal logging to our application logger.
+   * 
+   * @param client - Prisma client instance
+   * @param logger - Application logger
+   */
+  private wireLogging(client: PrismaClient, logger: AppLogger): void {
+    client.$on('query' as never, (e: any) => {
+      logger.debug(`[Prisma] Query: ${e.query} (${e.duration}ms)`);
+    });
+
+    client.$on('error' as never, (e: any) => {
+      logger.error(`[Prisma] Error: ${e.message}`);
+    });
+
+    client.$on('warn' as never, (e: any) => {
+      logger.warn(`[Prisma] Warning: ${e.message}`);
     });
   }
 
   /**
    * Get the current Prisma client instance.
-   * Automatically initializes if not yet initialized.
+   * 
+   * **Usage:** Call this in your routes/services whenever you need to access the database.
+   * 
+   * @returns Prisma client instance
+   * @throws {Error} If manager is not initialized
+   * 
+   * @example
+   * ```typescript
+   * const client = await prismaManager.getClient();
+   * const users = await client.user.findMany();
+   * ```
    */
   async getClient(): Promise<PrismaClient> {
     if (!this.client) {
-      await this.initialize();
-    }
-
-    if (!this.client) {
-      throw new Error('[Prisma Manager] Failed to initialize client');
+      const error = '[Prisma Manager] ❌ Client not initialized. Call initialize(logger) first.';
+      this.logger?.error(error);
+      throw new Error(error);
     }
 
     return this.client;
   }
 
   /**
-   * Get current database URL (read-only)
+   * Get current database URL (read-only).
+   * 
+   * @returns Current DATABASE_URL or null if not initialized
    */
   getCurrentDatabaseUrl(): string | null {
     return this.currentDatabaseUrl;
   }
 
   /**
-   * Check if manager is initialized
+   * Check if manager is initialized and ready.
+   * 
+   * @returns True if initialized with a connected client
    */
   isReady(): boolean {
     return this.isInitialized && this.client !== null;
   }
 
   /**
-   * Track active request (for graceful shutdown)
+   * Increment active request counter.
+   * 
+   * **Usage:** Called automatically by Fastify middleware on request start.
    */
   incrementActiveRequests(): void {
     this.activeRequests++;
   }
 
   /**
-   * Track completed request
+   * Decrement active request counter.
+   * 
+   * **Usage:** Called automatically by Fastify middleware on request completion.
    */
   decrementActiveRequests(): void {
     this.activeRequests = Math.max(0, this.activeRequests - 1);
   }
 
   /**
-   * Get active request count
+   * Get current number of active requests.
+   * 
+   * @returns Active request count
    */
   getActiveRequestCount(): number {
     return this.activeRequests;
@@ -132,74 +236,96 @@ class PrismaManager {
 
   /**
    * Gracefully disconnect client and reset state.
-   * Called during shutdown (SIGTERM/SIGINT).
+   * 
+   * **Called during shutdown** (SIGTERM/SIGINT) by the server.
+   * 
+   * **What it does:**
+   * 1. Waits for active requests to complete (up to 10s)
+   * 2. Disconnects Prisma client
+   * 3. Resets all internal state
+   * 4. Marks as uninitialized
+   * 
+   * @throws {Error} If disconnect fails
+   * 
+   * @example
+   * ```typescript
+   * // In server shutdown handler:
+   * await prismaManager.disconnect();
+   * app.log.info('Database disconnected');
+   * ```
    */
   async disconnect(): Promise<void> {
     return this.mutex.runExclusive(async () => {
-      if (this.client) {
-        logger.info('[Prisma Manager] Disconnecting client...');
-        
-        // Wait for active requests to complete (with timeout)
-        const maxWait = 10000; // 10 seconds
-        const startTime = Date.now();
-        
-        while (this.activeRequests > 0 && (Date.now() - startTime) < maxWait) {
-          logger.info(
-            `[Prisma Manager] Waiting for ${this.activeRequests} active requests...`
-          );
-          await new Promise(resolve => setTimeout(resolve, 100));
-        }
-        
-        if (this.activeRequests > 0) {
-          logger.warn(
-            `[Prisma Manager] Force disconnecting with ${this.activeRequests} active requests`
-          );
-        }
-
-        await disconnect(this.client);
-        this.client = null;
-        this.currentDatabaseUrl = null;
-        this.isInitialized = false;
-        
-        logger.info('[Prisma Manager] Disconnected successfully');
+      if (!this.client) {
+        this.logger?.info('[Prisma Manager] No client to disconnect');
+        return;
       }
+
+      this.logger?.info('[Prisma Manager] Disconnecting client...');
+
+      // Wait for active requests to complete
+      await this.waitForActiveRequests();
+
+      // Disconnect client
+      await disconnect(this.client, this.logger!);
+
+      // Reset state
+      this.client = null;
+      this.currentDatabaseUrl = null;
+      this.isInitialized = false;
+
+      this.logger?.info('[Prisma Manager] ✓ Disconnected successfully');
     });
   }
 
   /**
-   * Reset manager to uninitialized state
+   * Wait for active requests to complete with timeout.
+   * 
+   * @param maxWaitMs - Maximum wait time in milliseconds (default: 10000)
+   */
+  private async waitForActiveRequests(maxWaitMs: number = 10000): Promise<void> {
+    const startTime = Date.now();
+
+    while (this.activeRequests > 0 && (Date.now() - startTime) < maxWaitMs) {
+      this.logger?.info(
+        `[Prisma Manager] Waiting for ${this.activeRequests} active requests...`
+      );
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+
+    if (this.activeRequests > 0) {
+      this.logger?.warn(
+        `[Prisma Manager] ⚠ Force disconnecting with ${this.activeRequests} active requests`
+      );
+    }
+  }
+
+  /**
+   * Reset manager to uninitialized state.
+   * 
+   * **Use case:** Testing or emergency cleanup.
+   * In production, just call `disconnect()`.
    */
   async reset(): Promise<void> {
     await this.disconnect();
-    logger.info('[Prisma Manager] Reset complete');
+    this.logger?.info('[Prisma Manager] Reset complete');
   }
 }
 
-// Export singleton instance
+/**
+ * Singleton instance of PrismaManager.
+ * 
+ * **This is the ONLY instance you should use throughout your application.**
+ * 
+ * @example
+ * ```typescript
+ * // In server.ts:
+ * import { prismaManager } from './db/manager.js';
+ * await prismaManager.initialize(app.log);
+ * 
+ * // In routes:
+ * import { prismaManager } from './db/manager.js';
+ * const client = await prismaManager.getClient();
+ * ```
+ */
 export const prismaManager = new PrismaManager();
-
-// Graceful shutdown handlers
-const shutdown = async (signal: string) => {
-  logger.info(`[Prisma Manager] Received ${signal}, shutting down gracefully...`);
-  await prismaManager.disconnect();
-  process.exit(0);
-};
-
-process.on('SIGINT', () => shutdown('SIGINT'));
-process.on('SIGTERM', () => shutdown('SIGTERM'));
-process.on('beforeExit', async () => {
-  await prismaManager.disconnect();
-});
-
-// Handle uncaught errors
-process.on('uncaughtException', async (error) => {
-  logger.error('[Prisma Manager] Uncaught exception:', error);
-  await prismaManager.disconnect();
-  process.exit(1);
-});
-
-process.on('unhandledRejection', async (reason: any) => {
-  logger.error('[Prisma Manager] Unhandled rejection:', reason);
-  await prismaManager.disconnect();
-  process.exit(1);
-});
