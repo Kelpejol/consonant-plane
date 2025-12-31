@@ -11,6 +11,7 @@ import { SocketManager } from './services/socket/index.js';
 import { randomBytes } from 'crypto';
 // import { ClusterStatus, EventType, AgentRunStatus } from '@prisma/client';
 import { prismaManager, dbPlugin, prisma } from './services/db/index.js';
+import { clusterRoutes } from './routes/clusters.route.js';
 
 const PORT = Number(process.env.PORT) || 3000;
 const HOST = process.env.HOST || '0.0.0.0';
@@ -199,6 +200,13 @@ const setupPlugins = async (server: FastifyInstance) => {
 //   });
 app.log.info('[Server] ✓ Plugins registered');
 };
+
+
+export async function buildApp(app: FastifyInstance) {
+  await app.register(clusterRoutes, {
+    prefix: '/api/v1',
+  });
+}
 
 // const setupSocketHandlers = () => {
 //   socketManager.on('cluster:validate', async (data) => {
@@ -425,56 +433,56 @@ app.get('/health', async (_request, reply) => {
 // API Routes
 // ============================================================================
 
-/**
- * Create a new cluster
- * 
- * POST /api/v1/clusters
- * Body: { name: string, namespace: string }
- */
-app.post('/api/v1/clusters', async (request, reply) => {
-  const { name, namespace } = request.body as any;
+// /**
+//  * Create a new cluster
+//  * 
+//  * POST /api/v1/clusters
+//  * Body: { name: string, namespace: string }
+//  */
+// app.post('/api/v1/clusters', async (request, reply) => {
+//   const { name, namespace } = request.body as any;
 
-  if (!name || !namespace) {
-    return reply.code(400).send({
-      success: false,
-      error: 'Missing required fields: name, namespace',
-    });
-  }
+//   if (!name || !namespace) {
+//     return reply.code(400).send({
+//       success: false,
+//       error: 'Missing required fields: name, namespace',
+//     });
+//   }
 
-  // Use Prisma client from request or import
-  const existingCluster = await prisma.cluster.findUnique({
-    where: { name },
-  });
+//   // Use Prisma client from request or import
+//   const existingCluster = await prisma.cluster.findUnique({
+//     where: { name },
+//   });
 
-  if (existingCluster) {
-    return reply.code(409).send({
-      success: false,
-      error: 'Cluster with this name already exists',
-    });
-  }
+//   if (existingCluster) {
+//     return reply.code(409).send({
+//       success: false,
+//       error: 'Cluster with this name already exists',
+//     });
+//   }
 
-  const tokenHash = randomBytes(64).toString('hex');
+//   const tokenHash = randomBytes(64).toString('hex');
 
-  const cluster = await prisma.cluster.create({
-    data: {
-      name,
-      namespace,
-      tokenHash,
-      status: 'PENDING',
-    },
-  });
+//   const cluster = await prisma.cluster.create({
+//     data: {
+//       name,
+//       namespace,
+//       tokenHash,
+//       status: 'PENDING',
+//     },
+//   });
 
-  return {
-    success: true,
-    data: {
-      id: cluster.id,
-      name: cluster.name,
-      namespace: cluster.namespace,
-      tokenHash: cluster.tokenHash,
-      status: cluster.status,
-    },
-  };
-});
+//   return {
+//     success: true,
+//     data: {
+//       id: cluster.id,
+//       name: cluster.name,
+//       namespace: cluster.namespace,
+//       tokenHash: cluster.tokenHash,
+//       status: cluster.status,
+//     },
+//   };
+// });
 
 
 /**
@@ -781,16 +789,19 @@ const gracefulShutdown = closeWithGrace({ delay: 10000 }, async ({ signal, err }
  */
 async function start(): Promise<void> {
   try {
-    // 1. Setup services
+    //  Setup services
     await setupServices();
 
-    // 2. Setup plugins
+    //  Setup plugins
     await setupPlugins(app);
 
-    // 3. Wait for Fastify to be ready
+     // routes
+  await buildApp(app)
+
+    // Wait for Fastify to be ready
     await app.ready();
 
-    // 4. Initialize Socket.IO
+    //  Initialize Socket.IO
     socketManager = new SocketManager(app.log);
     socketManager.initialize(app.server, {
       path: '/socket',
@@ -803,7 +814,7 @@ async function start(): Promise<void> {
       transports: ['websocket', 'polling'],
     });
 
-    // 5. Start listening
+    //  Start listening
     await app.listen({
       port: PORT,
       host: HOST,

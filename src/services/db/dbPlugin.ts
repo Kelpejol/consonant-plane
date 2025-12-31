@@ -206,5 +206,5 @@ const dbPlugin: FastifyPluginAsync = async (fastify: FastifyInstance) => {
  */
 export default fp(dbPlugin, {
   name: 'database-plugin',
-  fastify: '4.x',
+  fastify: '5.6.2',
 });
