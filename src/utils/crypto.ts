@@ -53,11 +53,15 @@ export function generateSecureToken(length: number = MIN_SECRET_LENGTH): string 
  * - Database IDs
  * - Request IDs
  * - SIDs
+ * crypto.randomUUID() produces a string with dashes (e.g., 550e8400-e29b-41d4-a716-446655440000). 
+ * While many modern backends accept this, strict OTLP collectors expect a hexadecimal string without dashes.
  * 
  * @returns UUID string
  */
 export function generateUUID(): string {
-  return crypto.randomUUID();
+  // Strips dashes to create a 32-character hex string
+  // '550e8400-e29b-41d4-a716-446655440000' -> '550e8400e29be41da716446655440000'
+  return crypto.randomUUID().replace(/-/g, '');
 }
 
 // ============================================================================

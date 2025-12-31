@@ -1,6 +1,5 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
-import { randomUUID } from 'node:crypto';
-
+import { generateUUID } from './crypto.js';
 export interface ExecutionContext {
   traceId: string;
   spanId?: string;
@@ -38,8 +37,8 @@ export class ContextManager {
 
   run<T>(context: Partial<ExecutionContext>, callback: () => T): T {
     const fullContext: ExecutionContext = {
-      traceId: context.traceId || randomUUID(),
-      requestId: context.requestId || randomUUID(),
+      traceId: context.traceId || generateUUID(),
+      requestId: context.requestId || generateUUID(),
       startTime: context.startTime || Date.now(),
       ...context,
     };
@@ -48,8 +47,8 @@ export class ContextManager {
 
   enterWith(context: Partial<ExecutionContext>): void {
     const fullContext: ExecutionContext = {
-      traceId: context.traceId || randomUUID(),
-      requestId: context.requestId || randomUUID(),
+      traceId: context.traceId || generateUUID(),
+      requestId: context.requestId || generateUUID(),
       startTime: context.startTime || Date.now(),
       ...context,
     };

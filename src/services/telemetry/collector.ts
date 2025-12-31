@@ -1,6 +1,7 @@
 import { EventEmitter } from 'events';
-import { randomUUID } from 'crypto';
 import { TelemetryEvent, TelemetryEventType, LogLevel, TelemetryContext } from './types.js';
+import { generateUUID } from '@/utils/crypto.js';
+import { contextManager } from '@/utils/context.js';
 
 export interface TelemetryCollectorConfig {
   clusterId: string;
@@ -25,12 +26,18 @@ export class TelemetryCollector extends EventEmitter {
   }
 
   collect(event: Partial<TelemetryEvent>): void {
+    // Inside TelemetryCollector.collect
+const activeContext = contextManager.getAllContext();
     const fullEvent: TelemetryEvent = {
-      id: event.id || `evt_${Date.now()}_${randomUUID()}`,
+      id: event.id || `evt_${Date.now()}_${generateUUID()}`,
       type: event.type!,
       context: {
         clusterId: this.config.clusterId,
         timestamp: Date.now(),
+        // Use context from contextManager if not explicitly provided
+    traceId: event.context?.traceId || activeContext?.traceId,
+    requestId: event.context?.requestId || activeContext?.requestId,
+    agentRunId: event.context?.agentRunId || activeContext?.agentRunId,
         ...event.context,
       } as TelemetryContext,
       level: event.level || LogLevel.INFO,

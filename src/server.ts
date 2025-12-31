@@ -12,30 +12,19 @@ import { randomBytes } from 'crypto';
 // import { ClusterStatus, EventType, AgentRunStatus } from '@prisma/client';
 import { prismaManager, dbPlugin, prisma } from './services/db/index.js';
 import { clusterRoutes } from './routes/clusters.route.js';
+import { logger } from './utils/logger.js';
+import { contextManager } from './utils/context.js';
+import { generateUUID } from './utils/crypto.js';
 
 const PORT = Number(process.env.PORT) || 3000;
 const HOST = process.env.HOST || '0.0.0.0';
 const IS_PROD = process.env.NODE_ENV === 'production';
+const UUID = generateUUID()
 
-const DATABASE_URL = process.env.DATABASE_URL || 'postgresql://postgres:postgres@localhost:5432/terra';
-const REDIS_HOST = process.env.REDIS_HOST || 'localhost';
-const REDIS_PORT = Number(process.env.REDIS_PORT) || 6379;
-const REDIS_PASSWORD = process.env.REDIS_PASSWORD;
+
 
 const app: FastifyInstance = Fastify({
-  logger: {
-    level: IS_PROD ? 'info' : 'debug',
-    transport: !IS_PROD
-      ? {
-          target: 'pino-pretty',
-          options: {
-            colorize: true,
-            translateTime: 'HH:MM:ss Z',
-            ignore: 'pid,hostname',
-          },
-        }
-      : undefined,
-  },
+  logger: logger, //sync with our utils helper
   disableRequestLogging: false,
   trustProxy: true,
   requestIdHeader: 'x-request-id',
@@ -326,13 +315,38 @@ export async function buildApp(app: FastifyInstance) {
 // Request Logging Hook
 // ============================================================================
 
+app.addHook('onRequest', (request, reply, done) => {
+  const traceId = (request.headers['x-trace-id'] as string) || UUID;
+  const requestId = request.id as string;
+
+  // We wrap the rest of the request lifecycle in this context
+  contextManager.run({ 
+    traceId, 
+    requestId,
+    startTime: Date.now() 
+  }, () => {
+    // Calling done() here means all subsequent hooks (preHandler, onResponse) 
+    // and your route handler will stay inside this context.
+    done();
+  });
+});
+
+// ============================================================================
+// Response Logging Hook
+// ============================================================================
+
 app.addHook('onResponse', (request, reply, done) => {
+  // Using request.log or our global logger will now both 
+  // automatically include the context metadata.
   request.log.info({
     method: request.method,
     url: request.url,
     statusCode: reply.statusCode,
-    duration: reply.elapsedTime.toFixed(2) + 'ms'
+    duration: reply.elapsedTime.toFixed(2) + 'ms',
+    // You can still add specific metadata here
+    userId: contextManager.getMetadata('userId') 
   }, 'request completed');
+  
   done();
 });
 

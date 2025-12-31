@@ -84,6 +84,7 @@
     "zod": "^4.1.13"
   },
   "devDependencies": {
+    "@types/bcrypt": "^6.0.0",
     "@types/node": "^24.10.4",
     "concurrently": "^9.2.1",
     "eslint": "^9.39.2",
