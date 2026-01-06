@@ -5,7 +5,6 @@ import rateLimit from '@fastify/rate-limit';
 import compress from '@fastify/compress';
 import closeWithGrace from 'close-with-grace';
 import { createServer } from 'http';
-import { SocketManager } from './services/socket/index.js';
 // import { RedisService } from './redis-service';
 // import { QueueService, QueueName } from './queue-service';
 import { randomBytes } from 'crypto';
@@ -15,12 +14,20 @@ import { clusterRoutes } from './routes/clusters.route.js';
 import { logger } from './utils/logger.js';
 import { contextManager } from './utils/context.js';
 import { generateUUID } from './utils/crypto.js';
+import { createGrpcServer, GrpcServer } from './grpc/server.js';
 
 const PORT = Number(process.env.PORT) || 3000;
 const HOST = process.env.HOST || '0.0.0.0';
 const IS_PROD = process.env.NODE_ENV === 'production';
 const UUID = generateUUID()
 
+
+// gRPC Server Configuration
+const GRPC_PORT = Number(process.env.GRPC_PORT) || 50051;
+const GRPC_HOST = process.env.GRPC_HOST || '0.0.0.0';
+const GRPC_TLS_ENABLED = process.env.GRPC_TLS_ENABLED === 'true';
+const GRPC_TLS_CERT = process.env.GRPC_TLS_CERT;
+const GRPC_TLS_KEY = process.env.GRPC_TLS_KEY;
 
 
 const app: FastifyInstance = Fastify({
@@ -37,7 +44,7 @@ const app: FastifyInstance = Fastify({
 
 // let redis: RedisService;
 // let queue: QueueService;
-let socketManager: SocketManager;
+let grpcServer: GrpcServer | null = null
 
 
 // ============================================================================
@@ -369,24 +376,6 @@ app.setErrorHandler((error: any, request, reply) => {
 });
 
 // ============================================================================
-// Error Handler
-// ============================================================================
-
-app.setErrorHandler((error: any, request, reply) => {
-  request.log.error(error);
-
-  const statusCode = error.statusCode || 500;
-  const errorResponse = {
-    success: false,
-    error: IS_PROD ? 'Internal Server Error' : error.name,
-    message: error.message,
-    ...(IS_PROD ? {} : { stack: error.stack }),
-  };
-
-  reply.status(statusCode).send(errorResponse);
-});
-
-// ============================================================================
 // Health Check Routes
 // ============================================================================
 
@@ -415,12 +404,17 @@ app.get('/health', async (_request, reply) => {
       }
     }
 
-    const status = hasDatabase && dbConnected ? 'healthy' : 'initializing';
-
+     // Check gRPC server status
+    const grpcStatus = grpcServer?.getStats() || { isRunning: false };
+     const status = (hasDatabase && dbConnected && grpcStatus.isRunning) 
+      ? 'healthy' 
+      : 'initializing';
     return {
       status,
       services: {
         database: dbConnected ? 'connected' : hasDatabase ? 'error' : 'not configured',
+        grpc: grpcStatus.isRunning ? 'running' : 'stopped',
+        // grpcConnections: grpcStatus.connections || 0
         // redis: redis ? 'connected' : 'not configured',
         // queue: queue ? 'connected' : 'not configured',
       },
@@ -436,6 +430,7 @@ app.get('/health', async (_request, reply) => {
       status: 'unhealthy',
       services: {
         database: 'error',
+        grpc: 'error'
       },
       error: errorMessage,
       timestamp: new Date().toISOString(),
@@ -711,14 +706,14 @@ const gracefulShutdown = closeWithGrace({ delay: 10000 }, async ({ signal, err }
 
   app.log.info(`[Shutdown] 🛑 Received ${signal}, shutting down gracefully...`);
 
-  // 1. Close socket connections
-  if (socketManager) {
-    app.log.info('[Shutdown] Closing socket connections...');
-    await socketManager.shutdown();
-    app.log.info('[Shutdown] ✓ Socket connections closed');
-  }
-
+  
   // 2. Shutdown queue workers (commented out until implemented)
+    // 1. Stop gRPC server (close active streams)
+  if (grpcServer) {
+    app.log.info('[Shutdown] Stopping gRPC server...');
+    await grpcServer.stop();
+    app.log.info('[Shutdown] ✓ gRPC server stopped');
+  }
   // if (queue) {
   //   app.log.info('[Shutdown] Shutting down queue workers...');
   //   await queue.shutdown();
@@ -766,20 +761,26 @@ async function start(): Promise<void> {
     // Wait for Fastify to be ready
     await app.ready();
 
-    //  Initialize Socket.IO
-    socketManager = new SocketManager(app.log);
-    socketManager.initialize(app.server, {
-      path: '/socket',
-      cors: {
-        origin: process.env.CORS_ORIGIN || '*',
-        credentials: true,
-      },
-      pingTimeout: 60000,
-      pingInterval: 25000,
-      transports: ['websocket', 'polling'],
+   
+
+    // ✅ START GRPC SERVER
+    app.log.info('[Server] 🔌 Starting gRPC server...');
+    grpcServer = createGrpcServer({
+      port: GRPC_PORT,
+      host: GRPC_HOST,
+      tlsEnabled: GRPC_TLS_ENABLED,
+      tlsCert: GRPC_TLS_CERT,
+      tlsKey: GRPC_TLS_KEY,
+      maxConnectionAge: 3600000,      // 1 hour
+      maxConnectionIdle: 300000,       // 5 minutes
+      keepaliveTime: 30000,            // 30 seconds
+      keepaliveTimeout: 10000          // 10 seconds
     });
 
-    //  Start listening
+    await grpcServer.start();
+    app.log.info('[Server] ✓ gRPC server started');
+
+    // Start Fastify HTTP server
     await app.listen({
       port: PORT,
       host: HOST,
@@ -787,7 +788,7 @@ async function start(): Promise<void> {
 
     app.log.info(`[Server] 🚀 Server started successfully`);
     app.log.info(`[Server] 📡 Listening on http://${HOST}:${PORT}`);
-    app.log.info(`[Server] 🔌 Socket.IO available at http://${HOST}:${PORT}/socket`);
+   app.log.info(`[Server] 🔌 gRPC: ${GRPC_HOST}:${GRPC_PORT}`);
     app.log.info(`[Server] 🏥 Health check at http://${HOST}:${PORT}/health`);
     app.log.info(`[Server] 📊 Database health at http://${HOST}:${PORT}/health/db`);
   } catch (err) {
