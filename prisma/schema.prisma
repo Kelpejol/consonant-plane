@@ -67,6 +67,69 @@ enum EventType {
   INVOKE_ERROR
 }
 
+
+/// Represents a Terra agent definition and its lifecycle
+model Agent {
+  id                String      @id @default(uuid())
+  name              String
+  clusterId         String
+  status            AgentStatus @default(PENDING)
+  
+  // Agent definitions
+  terraDefinition   Json        // Original Terra YAML as JSON
+  kagentCrd         Json?       // Generated Kagent CRD as JSON
+  
+  // Runtime configuration
+  image             String      // Container image
+  replicas          Int         @default(1)
+  
+  // Resource limits (stored for quick access)
+  cpuRequest        String?
+  cpuLimit          String?
+  memoryRequest     String?
+  memoryLimit       String?
+  
+  // Deployment tracking
+  deploymentId      String?     @unique
+  deployedAt        DateTime?
+  
+  // Error tracking
+  error             String?     // Last error message
+  errorCount        Int         @default(0)
+  
+  // Metadata
+  description       String?
+  labels            Json?
+  annotations       Json?
+  
+  // Timestamps
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
+  
+  // Relations
+  //cluster           Cluster     @relation(fields: [clusterId], references: [id], onDelete: Cascade)
+  //runs              AgentRun[]
+  //events            Event[]
+  
+  @@unique([clusterId, name])
+  @@index([clusterId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+/// Agent lifecycle status tracking
+enum AgentStatus {
+  PENDING      // Agent definition created, awaiting validation
+  VALIDATING   // Structure and semantic validation in progress
+  CONVERTING   // Converting Terra definition to Kagent CRD
+  DEPLOYING    // Sending to cluster via mediator
+  ACTIVE       // Successfully deployed and running
+  FAILED       // Deployment or validation failed
+  UPDATING     // Agent definition being updated
+  DELETING     // Agent deletion in progress
+  DELETED      // Agent successfully deleted
+}
+
 model AgentRun {
   id          String   @id @default(cuid())
   clusterId   String

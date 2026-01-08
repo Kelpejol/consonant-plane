@@ -1,7 +1,7 @@
 import { CommandResult, Command, ServerMessage } from '@consonant/proto-relayer';
-import { logger } from '../../utils/logger.js';
+import { logger } from '../../../utils/logger.js';
 import { ConnectionManager } from '../connection-manager.js';
-import { prisma } from '../../services/db/index.js';
+import { prisma } from '../../db/index.js';
 
 /**
  * Handles command results received from relayers

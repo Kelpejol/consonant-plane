@@ -1,6 +1,6 @@
 import { Event } from '@consonant/proto-relayer';
-import { logger } from '../../utils/logger.js';
-import { prisma } from '../../services/db/index.js';
+import { logger } from '../../../utils/logger.js';
+import { prisma } from '../../db/index.js';
 
 /**
  * Handles events received from relayers

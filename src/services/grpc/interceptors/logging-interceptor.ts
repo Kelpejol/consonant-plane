@@ -1,5 +1,5 @@
 import * as grpc from '@grpc/grpc-js';
-import { logger } from '../../utils/logger.js';
+import { logger } from '../../../utils/logger.js';
 
 export const loggingInterceptor: grpc.Interceptor = (
   options: grpc.InterceptorOptions,

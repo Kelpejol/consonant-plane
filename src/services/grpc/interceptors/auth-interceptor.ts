@@ -1,6 +1,6 @@
 import * as grpc from '@grpc/grpc-js';
-import { logger } from '../../utils/logger.js';
-import { prisma } from '../../services/db/index.js';
+import { logger } from '../../../utils/logger.js';
+import { prisma } from '../../db/index.js';
 import { timingSafeEqual } from '@/utils/crypto.js';
 
 /**

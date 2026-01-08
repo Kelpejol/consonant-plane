@@ -14,8 +14,16 @@ import { clusterRoutes } from './routes/clusters.route.js';
 import { logger } from './utils/logger.js';
 import { contextManager } from './utils/context.js';
 import { generateUUID } from './utils/crypto.js';
-import { createGrpcServer, GrpcServer } from './grpc/server.js';
+import { createGrpcServer, GrpcServer } from './services/grpc/server.js';
 
+import { serve } from 'inngest/fastify';
+import { inngest } from './services/inngest/client.js';
+import * as inngestFunctions from './services/inngest/functions/index.js';
+import { agentRoutes } from './routes/agents.route.js';
+
+// ============================================================================
+// Server Configuration
+// ============================================================================
 const PORT = Number(process.env.PORT) || 3000;
 const HOST = process.env.HOST || '0.0.0.0';
 const IS_PROD = process.env.NODE_ENV === 'production';
@@ -47,9 +55,11 @@ const app: FastifyInstance = Fastify({
 let grpcServer: GrpcServer | null = null
 
 
+
 // ============================================================================
 // Service Setup Functions
 // ============================================================================
+
 
 const setupServices = async () => {
  app.log.info('[Server] 🚀 Initializing services...');
@@ -58,6 +68,15 @@ const setupServices = async () => {
   app.log.info('[Server] 📊 Connecting to database...');
   await prismaManager.initialize(app.log);
   app.log.info('[Server] ✓ Database connected');
+
+    // Register Inngest endpoint
+  app.all(
+    '/api/inngest',
+    serve({
+      client: inngest,
+      functions: Object.values(inngestFunctions),
+    })
+  );
 
 
 //   redis = new RedisService(
@@ -202,6 +221,9 @@ export async function buildApp(app: FastifyInstance) {
   await app.register(clusterRoutes, {
     prefix: '/api/v1',
   });
+
+  await app.register(agentRoutes, { prefix: '/api/v1' });
+
 }
 
 // const setupSocketHandlers = () => {
