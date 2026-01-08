@@ -72,7 +72,7 @@ enum EventType {
 
 
 /// Represents a Terra agent definition and its lifecycle
-model AgentDefinition {
+model Agent {
   id                String      @id @default(uuid())
   name              String
   clusterId         String
@@ -119,7 +119,7 @@ model AgentDefinition {
   @@index([clusterId])
   @@index([status])
   @@index([createdAt])
-   @@map("agent_definitions")
+   @@map("agents")
 }
 
 /// Agent lifecycle status tracking

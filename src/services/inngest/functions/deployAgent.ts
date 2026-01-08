@@ -2,7 +2,7 @@
  * Inngest function for deploying Kagent agents to clusters via mediator.
  */
 
-import { inngest, sendTerraEvent } from '../client.js';
+import { inngest, sendEvent } from '../client.js';
 import { prisma } from '../../../services/db/index.js';
 import { sendKagentCRDToMediator } from '../../grpc/client.js';
 import { logger } from '../../../utils/logger.js';
@@ -71,7 +71,7 @@ export const deployKagentAgentFn = inngest.createFunction(
 
     // Step 5: Emit deployed event
     await step.run('emit-deployed-event', async () => {
-      await sendTerraEvent({
+      await sendEvent({
         name: 'terra.agent.deployed',
         data: {
           agentId,
