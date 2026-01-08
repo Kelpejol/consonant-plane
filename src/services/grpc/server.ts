@@ -7,8 +7,8 @@
 
 import * as grpc from '@grpc/grpc-js';
 import { logger } from '../../utils/logger.js';
-import { ConnectionManager } from './connection-manager.js';
-import { RelayerServiceImpl } from './services/relayer-service.js';
+// import { ConnectionManager } from './connection-manager.js';
+// import { RelayerServiceImpl } from './services/relayer-service.js';
 import { authInterceptor } from './interceptors/auth-interceptor.js';
 import { loggingInterceptor } from './interceptors/logging-interceptor.js';
 import { errorInterceptor } from './interceptors/error-interceptor.js';

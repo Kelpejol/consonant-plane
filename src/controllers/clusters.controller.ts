@@ -19,7 +19,7 @@ export async function createClusterController(
     });
   }
 
-  const prisma = request.prisma; // injected by plugin
+ 
 
   const existingCluster = await prisma.cluster.findUnique({
     where: { name },

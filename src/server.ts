@@ -14,7 +14,7 @@ import { clusterRoutes } from './routes/clusters.route.js';
 import { logger } from './utils/logger.js';
 import { contextManager } from './utils/context.js';
 import { generateUUID } from './utils/crypto.js';
-import { createGrpcServer, GrpcServer } from './services/grpc/server.js';
+// import { createGrpcServer, GrpcServer } from './services/grpc/server.js';
 
 import { serve } from 'inngest/fastify';
 import { inngest } from './services/inngest/client.js';
@@ -39,7 +39,19 @@ const GRPC_TLS_KEY = process.env.GRPC_TLS_KEY;
 
 
 const app: FastifyInstance = Fastify({
-  logger: logger, //sync with our utils helper
+   logger: {
+    level: IS_PROD ? 'info' : 'debug',
+    transport: !IS_PROD
+      ? {
+          target: 'pino-pretty',
+          options: {
+            colorize: true,
+            translateTime: 'HH:MM:ss Z',
+            ignore: 'pid,hostname',
+          },
+        }
+      : undefined,
+  },
   disableRequestLogging: false,
   trustProxy: true,
   requestIdHeader: 'x-request-id',
@@ -52,7 +64,7 @@ const app: FastifyInstance = Fastify({
 
 // let redis: RedisService;
 // let queue: QueueService;
-let grpcServer: GrpcServer | null = null
+// let grpcServer: GrpcServer | null = null
 
 
 
@@ -69,14 +81,7 @@ const setupServices = async () => {
   await prismaManager.initialize(app.log);
   app.log.info('[Server] ✓ Database connected');
 
-    // Register Inngest endpoint
-  app.all(
-    '/api/inngest',
-    serve({
-      client: inngest,
-      functions: Object.values(inngestFunctions),
-    })
-  );
+
 
 
 //   redis = new RedisService(
@@ -223,6 +228,22 @@ export async function buildApp(app: FastifyInstance) {
   });
 
   await app.register(agentRoutes, { prefix: '/api/v1' });
+
+
+      // Register Inngest endpoint
+  app.all(
+    '/api/inngest',
+    serve({
+      client: inngest,
+      functions: [
+    inngestFunctions.convertTerraToKagentFn,
+    inngestFunctions.requestDeploymentFn,
+    inngestFunctions.handleDeploymentConfirmationFn,
+    inngestFunctions.handleAgentFailureFn,
+    inngestFunctions.handleInngestFunctionFailureFn,
+  ],
+    })
+  );
 
 }
 
@@ -427,15 +448,18 @@ app.get('/health', async (_request, reply) => {
     }
 
      // Check gRPC server status
-    const grpcStatus = grpcServer?.getStats() || { isRunning: false };
-     const status = (hasDatabase && dbConnected && grpcStatus.isRunning) 
+    //const grpcStatus = grpcServer?.getStats() || { isRunning: false };
+     const status = (hasDatabase && dbConnected 
+      // && grpcStatus.isRunning
+    ) 
+
       ? 'healthy' 
       : 'initializing';
     return {
       status,
       services: {
         database: dbConnected ? 'connected' : hasDatabase ? 'error' : 'not configured',
-        grpc: grpcStatus.isRunning ? 'running' : 'stopped',
+       // grpc: grpcStatus.isRunning ? 'running' : 'stopped',
         // grpcConnections: grpcStatus.connections || 0
         // redis: redis ? 'connected' : 'not configured',
         // queue: queue ? 'connected' : 'not configured',
@@ -731,11 +755,11 @@ const gracefulShutdown = closeWithGrace({ delay: 10000 }, async ({ signal, err }
   
   // 2. Shutdown queue workers (commented out until implemented)
     // 1. Stop gRPC server (close active streams)
-  if (grpcServer) {
-    app.log.info('[Shutdown] Stopping gRPC server...');
-    await grpcServer.stop();
-    app.log.info('[Shutdown] ✓ gRPC server stopped');
-  }
+  // if (grpcServer) {
+  //   app.log.info('[Shutdown] Stopping gRPC server...');
+  //   await grpcServer.stop();
+  //   app.log.info('[Shutdown] ✓ gRPC server stopped');
+  // }
   // if (queue) {
   //   app.log.info('[Shutdown] Shutting down queue workers...');
   //   await queue.shutdown();
@@ -787,19 +811,19 @@ async function start(): Promise<void> {
 
     // ✅ START GRPC SERVER
     app.log.info('[Server] 🔌 Starting gRPC server...');
-    grpcServer = createGrpcServer({
-      port: GRPC_PORT,
-      host: GRPC_HOST,
-      tlsEnabled: GRPC_TLS_ENABLED,
-      tlsCert: GRPC_TLS_CERT,
-      tlsKey: GRPC_TLS_KEY,
-      maxConnectionAge: 3600000,      // 1 hour
-      maxConnectionIdle: 300000,       // 5 minutes
-      keepaliveTime: 30000,            // 30 seconds
-      keepaliveTimeout: 10000          // 10 seconds
-    });
+    // grpcServer = createGrpcServer({
+    //   port: GRPC_PORT,
+    //   host: GRPC_HOST,
+    //   tlsEnabled: GRPC_TLS_ENABLED,
+    //   tlsCert: GRPC_TLS_CERT,
+    //   tlsKey: GRPC_TLS_KEY,
+    //   maxConnectionAge: 3600000,      // 1 hour
+    //   maxConnectionIdle: 300000,       // 5 minutes
+    //   keepaliveTime: 30000,            // 30 seconds
+    //   keepaliveTimeout: 10000          // 10 seconds
+    // });
 
-    await grpcServer.start();
+    // await grpcServer.start();
     app.log.info('[Server] ✓ gRPC server started');
 
     // Start Fastify HTTP server

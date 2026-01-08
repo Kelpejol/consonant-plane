@@ -3,11 +3,10 @@
  */
 
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
-import { prisma } from '../services/db/index.js';
 import { parseYAML } from '../utils/yaml-parser.js';
 import { validateTerraAgent } from '../schemas/agent.schema.js';
 import { validateTerraSemantics } from '../utils/validators.js';
-import { sendTerraEvent } from '../services/inngest/client.js';
+import { sendEvent, sendEvents } from '../services/inngest/client.js';
 import { logger } from '../utils/logger.js';
 import type { TerraAgentManifest } from '../schemas/agent.schema.js';
 
@@ -59,9 +58,11 @@ export async function agentRoutes(app: FastifyInstance) {
           warnings: semanticResult.warnings,
         });
       }
+      const prisma = request.prisma; // injected by plugin
+
 
       // Create agent in database
-      const agent = await prisma.agent.create({
+      const agent = await prisma.agentDefinition.create({
         data: {
           name: structuralResult.data.metadata.name,
           clusterId,
@@ -78,7 +79,7 @@ export async function agentRoutes(app: FastifyInstance) {
       });
 
       // Emit event to Inngest
-      await sendTerraEvent({
+      await sendEvent({
         name: 'terra.agent.created',
         data: {
           agentId: agent.id,
@@ -108,6 +109,7 @@ export async function agentRoutes(app: FastifyInstance) {
       return reply.code(500).send({
         success: false,
         error: error instanceof Error ? error.message : 'Unknown error',
+        data: Object.keys(prisma),
       });
     }
   });
@@ -117,7 +119,7 @@ export async function agentRoutes(app: FastifyInstance) {
    * List all agents
    */
   app.get('/agents', async () => {
-    const agents = await prisma.agent.findMany({
+    const agents = await prisma.agentDefinition.findMany({
       select: {
         id: true,
         name: true,
@@ -138,7 +140,7 @@ export async function agentRoutes(app: FastifyInstance) {
    * Get agent by ID
    */
   app.get<{ Params: { id: string } }>('/agents/:id', async (request, reply) => {
-    const agent = await prisma.agent.findUnique({
+    const agent = await prisma.agentDefinition.findUnique({
       where: { id: request.params.id },
     });
 
@@ -158,7 +160,7 @@ export async function agentRoutes(app: FastifyInstance) {
    */
   app.delete<{ Params: { id: string } }>('/agents/:id', async (request, reply) => {
     try {
-      await prisma.agent.delete({
+      await prisma.agentDefinition.delete({
         where: { id: request.params.id },
       });
 

@@ -8,7 +8,7 @@ generator client {
 // ⚠️ DO NOT CHANGE THIS LINE MANUALLY
 // Managed by scripts/syncPrismaProvider.ts
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
 }
 
 model Cluster {
@@ -43,6 +43,7 @@ enum ClusterStatus {
 
 model Event {
   id          String   @id @default(cuid())
+  agentId    String?
   clusterId   String
   type        EventType
   payload     Json
@@ -58,6 +59,8 @@ model Event {
 enum EventType {
   CLUSTER_ERROR
   AGENT_TRACE
+  AGENT_FAILED
+  AGENT_DEPLOYED
   AGENT_EVENT
   K8S_EVENT
   K8S_POD_STATUS
@@ -69,7 +72,7 @@ enum EventType {
 
 
 /// Represents a Terra agent definition and its lifecycle
-model Agent {
+model AgentDefinition {
   id                String      @id @default(uuid())
   name              String
   clusterId         String
@@ -88,6 +91,7 @@ model Agent {
   cpuLimit          String?
   memoryRequest     String?
   memoryLimit       String?
+  
   
   // Deployment tracking
   deploymentId      String?     @unique
@@ -115,6 +119,7 @@ model Agent {
   @@index([clusterId])
   @@index([status])
   @@index([createdAt])
+   @@map("agent_definitions")
 }
 
 /// Agent lifecycle status tracking

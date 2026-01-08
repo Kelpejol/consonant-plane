@@ -1,0 +1,43 @@
+apiVersion: terra.dev/v1
+kind: Agent
+metadata:
+  name: code-reviewer-ai
+  namespace: terra-agents
+  labels:
+    team: engineering
+    env: development
+spec:
+  description: AI-powered code review agent
+  
+  runtime:
+    image: myorg/code-reviewer:1.0.0
+    args:
+      - "--mode=development"
+    env:
+      MODEL: gpt-4
+      API_KEY: ${OPENAI_API_KEY}
+  
+  deployment:
+    resources:
+      cpu: "250m"
+      memory: "256Mi"
+    scaling:
+      replicas: 2
+  
+  limits:
+    resources:
+      maxCpu: "1"
+      maxMemory: "1Gi"
+    scaling:
+      maxReplicas: 10
+  
+  tools:
+    - name: code_analyzer
+      description: Analyzes code structure
+    - name: security_scanner
+      description: Scans for vulnerabilities
+  
+  policies:
+    approvals:
+      requiredFor:
+        - security_scanner
