@@ -22,9 +22,9 @@
  */
 
 import { inngest } from '../client.js';
-import { prisma } from '../../db/index.js';
 import { sendEvent } from '../client.js';
 import { logger } from '../../../utils/logger.js';
+import { prismaManager } from '@/services/db/manager.js';
 
 /**
  * Handle deployment confirmation from mediator.
@@ -65,6 +65,8 @@ export const handleDeploymentConfirmationFn = inngest.createFunction(
     const agent = await step.run('fetch-agent', async () => {
       logger.debug({ agentId }, 'Fetching agent from database');
 
+            const prisma = await prismaManager.getClient();
+    
       const fetchedAgent = await prisma.agent.findUnique({
         where: { id: agentId },
       });
@@ -91,6 +93,7 @@ export const handleDeploymentConfirmationFn = inngest.createFunction(
           deploymentId,
         }, 'Updating agent status to ACTIVE');
 
+         const prisma = await prismaManager.getClient();
         await prisma.agent.update({
           where: { id: agentId },
           data: {
@@ -114,6 +117,7 @@ export const handleDeploymentConfirmationFn = inngest.createFunction(
           error,
         }, 'Updating agent status to FAILED');
 
+         const prisma = await prismaManager.getClient();
         await prisma.agent.update({
           where: { id: agentId },
           data: {
@@ -156,7 +160,8 @@ export const handleDeploymentConfirmationFn = inngest.createFunction(
     // Step 4: Create event record for audit trail
     await step.run('create-event-record', async () => {
       logger.debug({ agentId }, 'Creating event record');
-
+     
+      const prisma = await prismaManager.getClient();
       await prisma.event.create({
         data: {
           type: success ? 'AGENT_DEPLOYED' : 'AGENT_FAILED',

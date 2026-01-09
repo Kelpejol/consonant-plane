@@ -18,9 +18,9 @@
  */
 
 import { inngest } from '../client.js';
-import { prisma } from '../../db/index.js';
 import { sendEvent } from '../client.js';
 import { logger } from '../../../utils/logger.js';
+import { prismaManager } from '@/services/db/manager.js';
 
 /**
  * Handle agent failure from terra.agent.failed events.
@@ -52,6 +52,8 @@ export const handleAgentFailureFn = inngest.createFunction(
 
     // Step 1: Fetch current agent state
     const agent = await step.run('fetch-agent', async () => {
+            const prisma = await prismaManager.getClient();
+    
       const fetchedAgent = await prisma.agent.findUnique({
         where: { id: agentId },
       });
@@ -80,6 +82,7 @@ export const handleAgentFailureFn = inngest.createFunction(
         stage,
       }, 'Updating agent status to FAILED');
 
+       const prisma = await prismaManager.getClient();
       await prisma.agent.update({
         where: { id: agentId },
         data: {
@@ -99,6 +102,7 @@ export const handleAgentFailureFn = inngest.createFunction(
     await step.run('create-failure-event', async () => {
       logger.debug({ agentId }, 'Creating failure event record');
 
+       const prisma = await prismaManager.getClient();
       await prisma.event.create({
         data: {
           type: 'AGENT_FAILED',

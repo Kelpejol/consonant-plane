@@ -42,10 +42,10 @@
 
 
 // Import all function definitions
-export { convertTerraToKagentFn } from './convertCRDs.js';
-export { requestDeploymentFn } from './requestDeployment.js';
-export { handleDeploymentConfirmationFn } from './handleDeploymentSuccess.js';
-export {
+import { convertTerraToKagentFn } from './convertCRDs.js';
+import { requestDeploymentFn } from './requestDeployment.js';
+import { handleDeploymentConfirmationFn } from './handleDeploymentSuccess.js';
+import {
   handleAgentFailureFn,
   handleInngestFunctionFailureFn,
 } from './handleDeploymentFailure.js';
@@ -66,7 +66,20 @@ export {
  * ```
  */
 export const allFunctions = [
-  // Don't include validateAgentFn since validation is synchronous in API
-  // validateAgentFn,
-  
+  convertTerraToKagentFn,
+  requestDeploymentFn,
+  handleDeploymentConfirmationFn,
+  handleAgentFailureFn,
+  handleInngestFunctionFailureFn,
 ] as const;
+
+/**
+ * Optional named exports (useful for testing or direct imports)
+ */
+export {
+  convertTerraToKagentFn,
+  requestDeploymentFn,
+  handleDeploymentConfirmationFn,
+  handleAgentFailureFn,
+  handleInngestFunctionFailureFn,
+};

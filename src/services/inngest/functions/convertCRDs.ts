@@ -16,11 +16,11 @@
  */
 
 import { inngest } from '../client.js';
-import { prisma } from '../../db/index.js';
 import { sendEvent } from '../client.js';
 import { logger } from '../../../utils/logger.js';
 import type { TerraAgentManifest } from '../../../schemas/agent.schema.js';
 import { convertTerraToKagent } from '@/helpers/convertCRDs.js';
+import { prismaManager } from '@/services/db/manager.js';
 /**
  * Convert Terra agent definition to Kagent CRD.
  * 
@@ -60,6 +60,7 @@ export const convertTerraToKagentFn = inngest.createFunction(
     const agent = await step.run('fetch-agent-from-db', async () => {
       logger.debug({ agentId }, 'Fetching agent from database');
 
+       const prisma = await prismaManager.getClient();
       const fetchedAgent = await prisma.agent.findUnique({
         where: { id: agentId },
       });
@@ -87,6 +88,7 @@ export const convertTerraToKagentFn = inngest.createFunction(
     await step.run('update-status-to-converting', async () => {
       logger.debug({ agentId }, 'Updating agent status to CONVERTING');
 
+       const prisma = await prismaManager.getClient();
       await prisma.agent.update({
         where: { id: agentId },
         data: {
@@ -128,6 +130,7 @@ export const convertTerraToKagentFn = inngest.createFunction(
     await step.run('store-kagent-crd', async () => {
       logger.debug({ agentId }, 'Storing Kagent CRD in database');
 
+       const prisma = await prismaManager.getClient();
       await prisma.agent.update({
         where: { id: agentId },
         data: {

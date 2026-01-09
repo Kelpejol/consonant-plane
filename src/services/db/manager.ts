@@ -189,6 +189,7 @@ class PrismaManager {
    * const users = await client.user.findMany();
    * ```
    */
+
   async getClient(): Promise<PrismaClient> {
     if (!this.client) {
       const error = '[Prisma Manager] ❌ Client not initialized. Call initialize(logger) first.';

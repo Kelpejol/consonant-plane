@@ -22,11 +22,11 @@
  */
 
 import { inngest } from '../client.js';
-import { prisma } from '../../db/index.js';
 import { sendEvent } from '../client.js';
 import { logger } from '../../../utils/logger.js';
 import type { KagentCRD } from '../../../types/agentManifest.js';
 import { sendKagentCRDToMediator } from '@/services/grpc/client.js';
+import { prismaManager } from '@/services/db/manager.js';
 
 /**
  * Request deployment of agent to cluster via mediator.
@@ -74,6 +74,7 @@ export const requestDeploymentFn = inngest.createFunction(
     const agent = await step.run('fetch-agent-and-crd', async () => {
       logger.debug({ agentId }, 'Fetching agent and CRD from database');
 
+       const prisma = await prismaManager.getClient();
       const fetchedAgent = await prisma.agent.findUnique({
         where: { id: agentId },
       });
@@ -94,6 +95,7 @@ export const requestDeploymentFn = inngest.createFunction(
     await step.run('update-status-to-deploying', async () => {
       logger.debug({ agentId }, 'Updating agent status to DEPLOYING');
 
+       const prisma = await prismaManager.getClient();
       await prisma.agent.update({
         where: { id: agentId },
         data: {
@@ -143,6 +145,7 @@ export const requestDeploymentFn = inngest.createFunction(
           deploymentId: mediatorResult.deploymentId,
         }, 'Storing deployment ID');
 
+         const prisma = await prismaManager.getClient();
         await prisma.agent.update({
           where: { id: agentId },
           data: {

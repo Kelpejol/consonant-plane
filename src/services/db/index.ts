@@ -68,12 +68,10 @@ export { prismaManager } from './manager.js';
  * const post = await prisma.post.create({ data: {...} });
  * ```
  */
-export { prisma, getPrismaClient, isPrismaReady } from './client.js';
 
 /**
  * Export Prisma Client type for typing
  */
-export type { PrismaClientType } from './client.js';
 
 // ============================================================================
 // Fastify Plugin

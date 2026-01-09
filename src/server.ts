@@ -9,7 +9,7 @@ import { createServer } from 'http';
 // import { QueueService, QueueName } from './queue-service';
 import { randomBytes } from 'crypto';
 // import { ClusterStatus, EventType, AgentRunStatus } from '@prisma/client';
-import { prismaManager, dbPlugin, prisma } from './services/db/index.js';
+import { prismaManager, dbPlugin } from './services/db/index.js';
 import { clusterRoutes } from './routes/clusters.route.js';
 import { logger } from './utils/logger.js';
 import { contextManager } from './utils/context.js';
@@ -235,13 +235,7 @@ export async function buildApp(app: FastifyInstance) {
     '/api/inngest',
     serve({
       client: inngest,
-      functions: [
-    inngestFunctions.convertTerraToKagentFn,
-    inngestFunctions.requestDeploymentFn,
-    inngestFunctions.handleDeploymentConfirmationFn,
-    inngestFunctions.handleAgentFailureFn,
-    inngestFunctions.handleInngestFunctionFailureFn,
-  ],
+      functions: inngestFunctions.allFunctions,
     })
   );
 
@@ -496,8 +490,8 @@ app.get('/health', async (_request, reply) => {
  * 
  * GET /api/v1/clusters
  */
-app.get('/api/v1/clusters', async (_request) => {
-  const clusters = await prisma.cluster.findMany({
+app.get('/api/v1/clusters', async (request) => {
+  const clusters = await request.prisma.cluster.findMany({
     select: {
       id: true,
       name: true,
@@ -522,7 +516,7 @@ app.get('/api/v1/clusters', async (_request) => {
 app.get<{ Params: { id: string } }>('/api/v1/clusters/:id', async (request, reply) => {
   const { id } = request.params;
 
-  const cluster = await prisma.cluster.findUnique({
+  const cluster = await request.prisma.cluster.findUnique({
     where: { id },
     select: {
       id: true,
@@ -556,7 +550,7 @@ app.delete<{ Params: { id: string } }>('/api/v1/clusters/:id', async (request, r
   const { id } = request.params;
 
   try {
-    await prisma.cluster.delete({
+    await request.prisma.cluster.delete({
       where: { id },
     });
 

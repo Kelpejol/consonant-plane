@@ -3,9 +3,10 @@
  */
 
 import { inngest, sendEvent } from '../client.js';
-import { prisma } from '../../../services/db/index.js';
 import { sendKagentCRDToMediator } from '../../grpc/client.js';
 import { logger } from '../../../utils/logger.js';
+import { prismaManager } from '@/services/db/manager.js';
+
 
 export const deployKagentAgentFn = inngest.createFunction(
   {
@@ -24,6 +25,7 @@ export const deployKagentAgentFn = inngest.createFunction(
 
     // Step 1: Fetch agent and CRD
     const agent = await step.run('fetch-agent-crd', async () => {
+       const prisma = await prismaManager.getClient();
       const fetchedAgent = await prisma.agent.findUnique({
         where: { id: agentId },
       });
@@ -37,6 +39,8 @@ export const deployKagentAgentFn = inngest.createFunction(
 
     // Step 2: Update status to DEPLOYING
     await step.run('update-status-deploying', async () => {
+       const prisma = await prismaManager.getClient();
+      
       await prisma.agent.update({
         where: { id: agentId },
         data: { status: 'DEPLOYING' },
@@ -59,6 +63,7 @@ export const deployKagentAgentFn = inngest.createFunction(
 
     // Step 4: Update agent to ACTIVE
     await step.run('update-status-active', async () => {
+       const prisma = await prismaManager.getClient();
       await prisma.agent.update({
         where: { id: agentId },
         data: {
