@@ -201,6 +201,124 @@ enum JobStatus {
 
 
 
+// ============================================================================
+// WORKFLOW ORCHESTRATION MODELS
+// ============================================================================
 
+/// Workflow state machine states
+/// Each state represents a deterministic checkpoint in the orchestration loop
+enum WorkflowStatus {
+  CREATED              // Initial state when workflow is created
+  RUNNING              // Workflow is actively executing
+  WAITING_ON_PLANNER   // Waiting for LangGraph planning response
+  WAITING_ON_POLICY    // Waiting for OPA policy decision
+  WAITING_ON_AGENT     // Waiting for agent execution to complete
+  WAITING_ON_HUMAN     // Human-in-the-loop approval required
+  PAUSED               // Workflow manually paused
+  COMPLETED            // Goal achieved successfully
+  FAILED               // Workflow failed
+}
+
+/// Main workflow record
+/// Represents a single execution of Terra's orchestration engine from goal to completion
+model Workflow {
+  id              String          @id @default(uuid())
+  goal            String          // Natural language goal submitted by user
+  status          WorkflowStatus  @default(CREATED)
+  
+  // Idempotency - ensures retried goal submissions return same workflow
+  idempotencyKey  String?         @unique
+  
+  // Context
+  environment     String          @default("default")
+  submittedBy     String?         // User/service that submitted the goal
+  
+  // OpenTelemetry tracing
+  traceId         String          @unique  // Trace ID for distributed tracing
+  rootSpanId      String?         // Root span for this workflow
+  
+  // Execution tracking
+  currentStep     Int             @default(0)
+  
+  // Error tracking
+  error           String?         // Last error message
+  errorCount      Int             @default(0)
+  
+  // Timestamps
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+  startedAt       DateTime?       // When workflow transitioned to RUNNING
+  completedAt     DateTime?       // When workflow completed or failed
+  
+  // Relations
+  history         WorkflowHistory[]
+  state           WorkflowState?
+  
+  @@index([status])
+  @@index([traceId])
+  @@index([createdAt])
+  @@index([submittedBy])
+  @@index([environment, status])
+  @@map("workflows")
+}
+
+/// Append-only workflow history for deterministic replay
+/// Every state transition is recorded with full context
+model WorkflowHistory {
+  id              String          @id @default(uuid())
+  workflowId      String
+  sequence        Int             // Monotonic sequence number for ordering
+  
+  // State transition
+  previousStatus  WorkflowStatus?
+  newStatus       WorkflowStatus
+  
+  // Event that triggered this transition
+  eventType       String          // e.g., "workflow.created", "policy.evaluated"
+  eventData       Json?           // Full event payload for replay
+  
+  // Decision record
+  reason          String?         // Human-readable reason for transition
+  decision        String?         // Decision made (e.g., "route_to_agent")
+  decisionInput   Json?           // Input to decision
+  decisionOutput  Json?           // Output from decision
+  
+  // OpenTelemetry tracing
+  spanId          String?         // Span ID for this history entry
+  
+  // Timestamp
+  timestamp       DateTime        @default(now())
+  
+  // Relation
+  workflow        Workflow        @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  
+  @@unique([workflowId, sequence])
+  @@index([workflowId, timestamp])
+  @@index([eventType])
+  @@map("workflow_history")
+}
+
+/// Current workflow state snapshot
+/// Stores mutable execution state separate from history
+model WorkflowState {
+  id              String          @id @default(uuid())
+  workflowId      String          @unique
+  
+  // Current execution state
+  currentPlan     Json?           // Current plan from LangGraph
+  lastAgentResult Json?           // Last agent execution result
+  context         Json            @default("{}")  // Accumulated execution context
+  
+  // Replay support - last applied history sequence
+  lastHistorySeq  Int             @default(0)
+  
+  // Timestamps
+  updatedAt       DateTime        @updatedAt
+  
+  // Relation
+  workflow        Workflow        @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  
+  @@map("workflow_states")
+}
 
 

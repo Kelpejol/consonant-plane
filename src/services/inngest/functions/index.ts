@@ -49,6 +49,7 @@ import {
   handleAgentFailureFn,
   handleInngestFunctionFailureFn,
 } from './handleDeploymentFailure.js';
+import { workflowOrchestratorFn } from './orchestrator.js';
 
 /**
  * Array of all functions for easy registration with Inngest.
@@ -71,6 +72,7 @@ export const allFunctions = [
   handleDeploymentConfirmationFn,
   handleAgentFailureFn,
   handleInngestFunctionFailureFn,
+  workflowOrchestratorFn,
 ] as const;
 
 /**
@@ -82,4 +84,5 @@ export {
   handleDeploymentConfirmationFn,
   handleAgentFailureFn,
   handleInngestFunctionFailureFn,
+  workflowOrchestratorFn,
 };

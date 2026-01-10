@@ -20,6 +20,7 @@ import { serve } from 'inngest/fastify';
 import { inngest } from './services/inngest/client.js';
 import * as inngestFunctions from './services/inngest/functions/index.js';
 import { agentRoutes } from './routes/agents.route.js';
+import { goalRoutes } from './routes/goals.route.js';
 
 // ============================================================================
 // Server Configuration
@@ -39,17 +40,17 @@ const GRPC_TLS_KEY = process.env.GRPC_TLS_KEY;
 
 
 const app: FastifyInstance = Fastify({
-   logger: {
+  logger: {
     level: IS_PROD ? 'info' : 'debug',
     transport: !IS_PROD
       ? {
-          target: 'pino-pretty',
-          options: {
-            colorize: true,
-            translateTime: 'HH:MM:ss Z',
-            ignore: 'pid,hostname',
-          },
-        }
+        target: 'pino-pretty',
+        options: {
+          colorize: true,
+          translateTime: 'HH:MM:ss Z',
+          ignore: 'pid,hostname',
+        },
+      }
       : undefined,
   },
   disableRequestLogging: false,
@@ -74,9 +75,9 @@ const app: FastifyInstance = Fastify({
 
 
 const setupServices = async () => {
- app.log.info('[Server] 🚀 Initializing services...');
- 
- // Initialize database
+  app.log.info('[Server] 🚀 Initializing services...');
+
+  // Initialize database
   app.log.info('[Server] 📊 Connecting to database...');
   await prismaManager.initialize(app.log);
   app.log.info('[Server] ✓ Database connected');
@@ -84,30 +85,30 @@ const setupServices = async () => {
 
 
 
-//   redis = new RedisService(
-//     {
-//       host: REDIS_HOST,
-//       port: REDIS_PORT,
-//       password: REDIS_PASSWORD,
-//       keyPrefix: 'terra:',
-//     },
-//     app.log
-//   );
-//   await redis.connect();
+  //   redis = new RedisService(
+  //     {
+  //       host: REDIS_HOST,
+  //       port: REDIS_PORT,
+  //       password: REDIS_PASSWORD,
+  //       keyPrefix: 'terra:',
+  //     },
+  //     app.log
+  //   );
+  //   await redis.connect();
 
-//   queue = new QueueService(
-//     {
-//       redis: {
-//         host: REDIS_HOST,
-//         port: REDIS_PORT,
-//         password: REDIS_PASSWORD,
-//       },
-//     },
-//     app.log
-//   );
-//   await queue.initialize();
+  //   queue = new QueueService(
+  //     {
+  //       redis: {
+  //         host: REDIS_HOST,
+  //         port: REDIS_PORT,
+  //         password: REDIS_PASSWORD,
+  //       },
+  //     },
+  //     app.log
+  //   );
+  //   await queue.initialize();
 
-//   setupWorkers();
+  //   setupWorkers();
 };
 
 // const setupWorkers = () => {
@@ -126,9 +127,9 @@ const setupServices = async () => {
 //     QueueName.AGENT_INVOCATION,
 //     async (job) => {
 //       const { clusterId, requestId, agentName, input, parameters } = job.data;
-      
+
 //       await db.createAgentRun(clusterId, agentName, requestId, input, parameters);
-      
+
 //       const invoked = socketManager.invokeAgent(clusterId, {
 //         requestId,
 //         agentName,
@@ -151,13 +152,13 @@ const setupServices = async () => {
 //     async (job) => {
 //       const { clusterId } = job.data;
 //       const cluster = await db.getCluster(clusterId);
-      
+
 //       if (!cluster) {
 //         return { healthy: false, reason: 'Cluster not found' };
 //       }
 
 //       const isConnected = socketManager.isClusterConnected(clusterId);
-      
+
 //       if (!isConnected && cluster.status === ClusterStatus.ACTIVE) {
 //         await db.updateClusterStatus(clusterId, ClusterStatus.INACTIVE);
 //         await redis.invalidateCluster(clusterId);
@@ -212,13 +213,13 @@ const setupPlugins = async (server: FastifyInstance) => {
 
   // Database plugin
   await server.register(dbPlugin);
-  
-//   await server.register(rateLimit, {
-//     max: 100,
-//     timeWindow: '1 minute',
-//     redis: redis.getClient(),
-//   });
-app.log.info('[Server] ✓ Plugins registered');
+
+  //   await server.register(rateLimit, {
+  //     max: 100,
+  //     timeWindow: '1 minute',
+  //     redis: redis.getClient(),
+  //   });
+  app.log.info('[Server] ✓ Plugins registered');
 };
 
 
@@ -229,8 +230,10 @@ export async function buildApp(app: FastifyInstance) {
 
   await app.register(agentRoutes, { prefix: '/api/v1' });
 
+  await app.register(goalRoutes, { prefix: '/api/v1' });
 
-      // Register Inngest endpoint
+
+  // Register Inngest endpoint
   app.all(
     '/api/inngest',
     serve({
@@ -244,7 +247,7 @@ export async function buildApp(app: FastifyInstance) {
 // const setupSocketHandlers = () => {
 //   socketManager.on('cluster:validate', async (data) => {
 //     app.log.info({ clusterId: data.clusterId }, 'Cluster validation request');
-    
+
 //     const isValid = await db.verifyClusterToken(data.clusterId, data.token);
 //     if (!isValid) {
 //       app.log.error({ clusterId: data.clusterId }, 'Invalid cluster token');
@@ -253,7 +256,7 @@ export async function buildApp(app: FastifyInstance) {
 
 //   socketManager.on('cluster:registered', async (data) => {
 //     app.log.info({ clusterId: data.clusterId }, 'Cluster registered');
-    
+
 //     await queue.addClusterRegistrationJob({
 //       clusterId: data.clusterId,
 //       clusterName: data.clusterName,
@@ -364,10 +367,10 @@ app.addHook('onRequest', (request, reply, done) => {
   const requestId = request.id as string;
 
   // We wrap the rest of the request lifecycle in this context
-  contextManager.run({ 
-    traceId, 
+  contextManager.run({
+    traceId,
     requestId,
-    startTime: Date.now() 
+    startTime: Date.now()
   }, () => {
     // Calling done() here means all subsequent hooks (preHandler, onResponse) 
     // and your route handler will stay inside this context.
@@ -388,9 +391,9 @@ app.addHook('onResponse', (request, reply, done) => {
     statusCode: reply.statusCode,
     duration: reply.elapsedTime.toFixed(2) + 'ms',
     // You can still add specific metadata here
-    userId: contextManager.getMetadata('userId') 
+    userId: contextManager.getMetadata('userId')
   }, 'request completed');
-  
+
   done();
 });
 
@@ -436,24 +439,24 @@ app.get('/health', async (_request, reply) => {
         await client.$queryRaw`SELECT 1`;
         dbConnected = true;
       } catch (error) {
-        app.log.warn({error}, '[Health Check] Database connection check failed');
+        app.log.warn({ error }, '[Health Check] Database connection check failed');
         dbConnected = false;
       }
     }
 
-     // Check gRPC server status
+    // Check gRPC server status
     //const grpcStatus = grpcServer?.getStats() || { isRunning: false };
-     const status = (hasDatabase && dbConnected 
+    const status = (hasDatabase && dbConnected
       // && grpcStatus.isRunning
-    ) 
+    )
 
-      ? 'healthy' 
+      ? 'healthy'
       : 'initializing';
     return {
       status,
       services: {
         database: dbConnected ? 'connected' : hasDatabase ? 'error' : 'not configured',
-       // grpc: grpcStatus.isRunning ? 'running' : 'stopped',
+        // grpc: grpcStatus.isRunning ? 'running' : 'stopped',
         // grpcConnections: grpcStatus.connections || 0
         // redis: redis ? 'connected' : 'not configured',
         // queue: queue ? 'connected' : 'not configured',
@@ -464,7 +467,7 @@ app.get('/health', async (_request, reply) => {
     };
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-    app.log.error({error}, '[Health Check] Health check failed');
+    app.log.error({ error }, '[Health Check] Health check failed');
 
     return reply.status(503).send({
       status: 'unhealthy',
@@ -706,7 +709,7 @@ app.delete<{ Params: { id: string } }>('/api/v1/clusters/:id', async (request, r
 
 // app.post('/api/v1/queues/:queueName/clean', async (request, reply) => {
 //   const { queueName } = request.params as any;
-  
+
 //   try {
 //     const cleaned = await queue.cleanQueue(queueName as QueueName);
 //     return {
@@ -741,14 +744,14 @@ app.delete<{ Params: { id: string } }>('/api/v1/clusters/:id', async (request, r
  */
 const gracefulShutdown = closeWithGrace({ delay: 10000 }, async ({ signal, err }) => {
   if (err) {
-    app.log.error({err}, '[Shutdown] Error triggered shutdown');
+    app.log.error({ err }, '[Shutdown] Error triggered shutdown');
   }
 
   app.log.info(`[Shutdown] 🛑 Received ${signal}, shutting down gracefully...`);
 
-  
+
   // 2. Shutdown queue workers (commented out until implemented)
-    // 1. Stop gRPC server (close active streams)
+  // 1. Stop gRPC server (close active streams)
   // if (grpcServer) {
   //   app.log.info('[Shutdown] Stopping gRPC server...');
   //   await grpcServer.stop();
@@ -795,13 +798,13 @@ async function start(): Promise<void> {
     //  Setup plugins
     await setupPlugins(app);
 
-     // routes
-  await buildApp(app)
+    // routes
+    await buildApp(app)
 
     // Wait for Fastify to be ready
     await app.ready();
 
-   
+
 
     // ✅ START GRPC SERVER
     app.log.info('[Server] 🔌 Starting gRPC server...');
@@ -828,18 +831,22 @@ async function start(): Promise<void> {
 
     app.log.info(`[Server] 🚀 Server started successfully`);
     app.log.info(`[Server] 📡 Listening on http://${HOST}:${PORT}`);
-   app.log.info(`[Server] 🔌 gRPC: ${GRPC_HOST}:${GRPC_PORT}`);
+    app.log.info(`[Server] 🔌 gRPC: ${GRPC_HOST}:${GRPC_PORT}`);
     app.log.info(`[Server] 🏥 Health check at http://${HOST}:${PORT}/health`);
     app.log.info(`[Server] 📊 Database health at http://${HOST}:${PORT}/health/db`);
   } catch (err) {
-    app.log.error({err}, '[Server] ❌ Failed to start server');
+    app.log.error({ err }, '[Server] ❌ Failed to start server');
     process.exit(1);
   }
 }
+
+
+
 
 // ============================================================================
 // Start Application
 // ============================================================================
 
 start();
+
 

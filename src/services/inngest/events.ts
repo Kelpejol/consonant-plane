@@ -196,6 +196,57 @@ export interface SystemErrorEvent {
 }
 
 // ============================================================================
+// WORKFLOW ORCHESTRATION EVENTS
+// ============================================================================
+
+/**
+ * Fired when a new workflow is created from a goal submission.
+ */
+export interface WorkflowCreatedEvent {
+  name: 'terra.workflow.created';
+  data: {
+    workflowId: string;
+    goal: string;
+    environment: string;
+    traceId: string;
+    submittedBy?: string;
+    createdAt: string;
+  };
+  user?: {
+    userId?: string;
+    tenantId?: string;
+  };
+}
+
+/**
+ * Fired to trigger the orchestration loop for a workflow.
+ * This is the main event that drives workflow execution.
+ */
+export interface WorkflowOrchestrationTriggerEvent {
+  name: 'terra.workflow.orchestration-trigger';
+  data: {
+    workflowId: string;
+    traceId: string;
+    trigger: 'initial' | 'resume' | 'event_received' | 'retry';
+    eventData?: Record<string, unknown>;
+  };
+}
+
+/**
+ * Fired when workflow state changes.
+ */
+export interface WorkflowStateChangedEvent {
+  name: 'terra.workflow.state-changed';
+  data: {
+    workflowId: string;
+    previousStatus: string;
+    newStatus: string;
+    reason?: string;
+    timestamp: string;
+  };
+}
+
+// ============================================================================
 // EVENT REGISTRY
 // ============================================================================
 
@@ -216,6 +267,10 @@ export type TerraEvents = {
   'terra.cluster.connection-changed': ClusterConnectionChangedEvent;
   'terra.system.health-check': SystemHealthCheckEvent;
   'terra.system.error': SystemErrorEvent;
+  // Workflow orchestration events
+  'terra.workflow.created': WorkflowCreatedEvent;
+  'terra.workflow.orchestration-trigger': WorkflowOrchestrationTriggerEvent;
+  'terra.workflow.state-changed': WorkflowStateChangedEvent;
 };
 
 /**

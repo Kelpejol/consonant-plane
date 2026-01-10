@@ -200,7 +200,7 @@ export function logInngestConfig(): void {
     environment: NODE_ENV,
     isProduction: IS_PROD,
     isDevMode: isInngestDevMode(),
-    hasEventKey: INNGEST_EVENT_KEY !== 'local',
+    hasEventKey: INNGEST_EVENT_KEY,
   }, 'Inngest client initialized');
 }
 

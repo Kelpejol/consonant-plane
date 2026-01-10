@@ -37,7 +37,7 @@ import type { DbConfig, DatabaseAdapter, AppLogger } from './types.js';
 export function createAdapter(logger: AppLogger, databaseUrl?: string): DatabaseAdapter {
   // Temporarily override DATABASE_URL if custom URL provided
   const originalUrl = process.env.DATABASE_URL;
-  
+
   try {
     if (databaseUrl) {
       process.env.DATABASE_URL = databaseUrl;
@@ -45,14 +45,14 @@ export function createAdapter(logger: AppLogger, databaseUrl?: string): Database
 
     // Detect provider from URL
     const dbConfig = detectProvider(logger);
-    
+
     // Create adapter for detected provider
     const adapter = createAdapterFromConfig(dbConfig, logger);
-    
+
     logger.info(
       `[DB Adapter] ✓ Created ${dbConfig.provider} adapter (detected from DATABASE_URL)`
     );
-    
+
     return adapter;
   } finally {
     // Restore original URL
@@ -81,17 +81,19 @@ function createAdapterFromConfig(config: DbConfig, logger: AppLogger): DatabaseA
   switch (config.provider) {
     case 'postgresql':
       return createPostgreSQLAdapter(config, logger);
-      
+
     case 'mysql':
       return createMySQLAdapter(config, logger);
-      
+
     case 'sqlite':
       return createSQLiteAdapter(config, logger);
-      
+
     default:
       throw new Error(`[DB Adapter] Unsupported database provider: ${config.provider}`);
   }
 }
+
+import pg from 'pg';
 
 /**
  * Creates PostgreSQL adapter using pg Pool.
@@ -101,13 +103,16 @@ function createAdapterFromConfig(config: DbConfig, logger: AppLogger): DatabaseA
  * @returns PrismaPg adapter instance
  */
 function createPostgreSQLAdapter(config: DbConfig, logger: AppLogger): DatabaseAdapter {
-  logger.info('[DB Adapter] Creating PostgreSQL adapter...');
-  
+  logger.info('[DB Adapter] Creating PostgreSQL adapter with managed pool...');
 
-
-  return new PrismaPg({
+  const pool = new pg.Pool({
     connectionString: config.connectionString,
+    max: 20,
+    idleTimeoutMillis: 30000,
+    connectionTimeoutMillis: 10000,
   });
+
+  return new PrismaPg(pool);
 }
 
 /**
@@ -120,7 +125,7 @@ function createPostgreSQLAdapter(config: DbConfig, logger: AppLogger): DatabaseA
  */
 function createMySQLAdapter(config: DbConfig, logger: AppLogger): DatabaseAdapter {
   logger.info('[DB Adapter] Creating MySQL adapter...');
-  
+
   if (!config.host || !config.user || !config.database) {
     throw new Error(
       '[DB Adapter] ❌ MySQL requires host, user, and database in DATABASE_URL'
@@ -151,8 +156,8 @@ function createMySQLAdapter(config: DbConfig, logger: AppLogger): DatabaseAdapte
  */
 function createSQLiteAdapter(config: DbConfig, logger: AppLogger): DatabaseAdapter {
   logger.info('[DB Adapter] Creating SQLite adapter...');
-  
-   return new PrismaLibSql({
+
+  return new PrismaLibSql({
     url: config.connectionString,
   });
 }
