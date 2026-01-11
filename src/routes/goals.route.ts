@@ -1,19 +1,21 @@
 /**
- * src/routes/goals.route.ts
+ * @fileoverview Goal Submission HTTP Route
+ * @module api/routes/goals
  * 
- * Goal ingestion API endpoint for Terra Orchestration Engine.
- * Implements POST /api/v1/goals for workflow creation.
+ * @description
+ * HTTP endpoint for goal submission.
+ * Creates workflow and triggers orchestration.
  * 
- * Design principles:
- * - Idempotent: Same idempotency key returns same workflow
- * - Durable: Workflow persisted to database before emitting events
- * - Traceable: Full OpenTelemetry trace propagation
- * - Auditable: Initial history record created with full context
+ * @architecture
+ * POST /goals → Validate → Persist → Emit Event → Return
+ * 
+ * @author Consonant Team
+ * @version 0.1.0
  */
 
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { validateGoalSubmission } from '../schemas/goal.schema.js';
-import { sendEvent } from '../services/inngest/client.js';
+import { emitOrchestrationTrigger } from '../services/inngest/client.js';
 import { logger } from '../utils/logger.js';
 import { generateUUID } from '../utils/crypto.js';
 import { WorkflowStatus } from '@prisma/client';
@@ -24,24 +26,25 @@ import type { Prisma } from '@prisma/client';
 // TYPES
 // ============================================================================
 
-interface CreateGoalBody {
+interface GoalSubmissionRequest {
+    /** User's goal description */
     goal: string;
-    environment?: string;
-    idempotencyKey?: string;
-    metadata?: Prisma.InputJsonValue;
-    submittedBy?: string;
+    /** Optional metadata to attach to the workflow */
+    context?: string;
 }
 
-interface WorkflowResponse {
+interface GoalSubmissionResponse {
+    /** Workflow ID */
     id: string;
+    /** User's goal description */
     goal: string;
+    /** Workflow status */
     status: WorkflowStatus;
-    environment: string;
+    /** Trace ID for distributed tracing */
     traceId: string;
+    /** Workflow creation timestamp */
     createdAt: string;
-    isNew: boolean;
 }
-
 
 
 // ============================================================================
@@ -49,18 +52,31 @@ interface WorkflowResponse {
 // ============================================================================
 
 export async function goalRoutes(app: FastifyInstance) {
-    /**
-     * POST /api/v1/goals
-     * 
-     * Create a new workflow from a goal submission.
-     * 
-     * Features:
-     * - Validates input using Zod schema
-     * - Handles idempotency (retry-safe)
-     * - Generates trace ID for distributed tracing
-     * - Persists workflow and initial history atomically
-     * - Emits orchestration trigger event
-     */
+   /**
+ * POST /goals - Submit a new workflow goal
+ * 
+ * @description
+ * Entry point for workflow creation.
+ * 
+ * **Flow**:
+ * 1. Validate request
+ * 2. Create workflow record in database
+ * 3. Emit orchestration.trigger event
+ * 4. Return workflow ID
+ * 
+ * **Important**: This does NOT run orchestration synchronously.
+ * Orchestration happens asynchronously via Inngest events.
+ * 
+ * @param req - Express request
+ * @param res - Express response
+ * 
+ * @example
+ * ```bash
+ * curl -X POST http://localhost:3000/goals \
+ *   -H "Content-Type: application/json" \
+ *   -d '{"goal": "Deploy application to production"}'
+ * ```
+ */
     app.post('/goals', async (request: FastifyRequest, reply: FastifyReply) => {
         const startTime = Date.now();
 
@@ -71,7 +87,7 @@ export async function goalRoutes(app: FastifyInstance) {
             if (!validation.valid) {
                 logger.warn(
                     { errors: validation.errors },
-                    'Goal submission validation failed'
+                   '[Goal Route] Goal submission validation failed'
                 );
                 return reply.code(400).send({
                     success: false,
@@ -80,43 +96,10 @@ export async function goalRoutes(app: FastifyInstance) {
                 });
             }
 
-            const { goal, environment, idempotencyKey, metadata, submittedBy } = validation.data as CreateGoalBody;
+            const { goal, context } = validation.data as GoalSubmissionRequest;
 
-            // Check idempotency - return existing workflow if key matches
-            if (idempotencyKey) {
-                const existingWorkflow = await request.prisma.workflow.findUnique({
-                    where: { idempotencyKey },
-                    select: {
-                        id: true,
-                        goal: true,
-                        status: true,
-                        environment: true,
-                        traceId: true,
-                        createdAt: true,
-                    },
-                });
-
-                if (existingWorkflow) {
-                    logger.info(
-                        { workflowId: existingWorkflow.id, idempotencyKey },
-                        'Returning existing workflow for idempotency key'
-                    );
-
-                    return reply.code(200).send({
-                        success: true,
-                        data: {
-                            id: existingWorkflow.id,
-                            goal: existingWorkflow.goal,
-                            status: existingWorkflow.status,
-                            environment: existingWorkflow.environment,
-                            traceId: existingWorkflow.traceId,
-                            createdAt: existingWorkflow.createdAt.toISOString(),
-                            isNew: false,
-                        } satisfies WorkflowResponse,
-                    });
-                }
-            }
-
+            logger.info('[Goal Route] Creating workflow');
+         
             // Generate trace ID for distributed tracing
             // Use request header if provided, otherwise generate new
             const traceId =
@@ -129,10 +112,7 @@ export async function goalRoutes(app: FastifyInstance) {
             // Prepare event data outside transaction to keep it light
             const historyEventData: Prisma.InputJsonValue = {
                 goal,
-                environment: environment || 'default',
-                ...(idempotencyKey ? { idempotencyKey } : {}),
-                ...(metadata ? { metadata } : {}),
-                ...(submittedBy ? { submittedBy } : {}),
+                context
             };
 
             // Create everything in a single nested create for maximum performance and atomicity
@@ -140,11 +120,9 @@ export async function goalRoutes(app: FastifyInstance) {
                 data: {
                     goal,
                     status: WorkflowStatus.CREATED,
-                    environment: environment || 'default',
-                    idempotencyKey: idempotencyKey || null,
-                    submittedBy: submittedBy || null,
                     traceId,
                     rootSpanId,
+                    context,
                     // Nested create for history
                     history: {
                         create: {
@@ -153,14 +131,13 @@ export async function goalRoutes(app: FastifyInstance) {
                             newStatus: WorkflowStatus.CREATED,
                             eventType: 'workflow.created',
                             eventData: historyEventData,
-                            reason: 'Goal submitted by user',
+                            reason: 'Goal submitted',
                             spanId: rootSpanId,
                         }
                     },
                     // Nested create for state
                     state: {
                         create: {
-                            context: metadata ? { userMetadata: metadata } : {},
                             lastHistorySeq: 0,
                         }
                     }
@@ -172,37 +149,15 @@ export async function goalRoutes(app: FastifyInstance) {
             logger.info(
                 {
                     workflowId: workflow.id,
-                    goal: goal.substring(0, 50),
-                    environment,
                     traceId,
                     durationMs: Date.now() - startTime,
                 },
-                'Workflow created successfully'
+                '[Goal Route] Workflow created successfully'
             );
 
             // Emit orchestration trigger event
-            // This will be picked up by the orchestration loop (implemented in later sections)
-            await sendEvent({
-                name: 'terra.workflow.orchestration-trigger',
-                data: {
-                    workflowId: workflow.id,
-                    traceId,
-                    trigger: 'initial',
-                },
-            });
-
-            // Also emit workflow created event for audit/monitoring
-            await sendEvent({
-                name: 'terra.workflow.created',
-                data: {
-                    workflowId: workflow.id,
-                    goal,
-                    environment: environment || 'default',
-                    traceId,
-                    submittedBy,
-                    createdAt: workflow.createdAt.toISOString(),
-                },
-            });
+            // This will be picked up by the orchestration loop and start the workflow
+          await emitOrchestrationTrigger(workflow.id, traceId, 'initial');
 
             return reply.code(201).send({
                 success: true,
@@ -210,11 +165,9 @@ export async function goalRoutes(app: FastifyInstance) {
                     id: workflow.id,
                     goal: workflow.goal,
                     status: workflow.status,
-                    environment: workflow.environment,
                     traceId: workflow.traceId,
                     createdAt: workflow.createdAt.toISOString(),
-                    isNew: true,
-                } satisfies WorkflowResponse,
+                } satisfies GoalSubmissionResponse,
             });
 
         } catch (error) {
@@ -223,15 +176,18 @@ export async function goalRoutes(app: FastifyInstance) {
                     error: error instanceof Error ? error.message : String(error),
                     stack: error instanceof Error ? error.stack : undefined,
                 },
-                'Failed to create workflow from goal'
+                '[Goal Route] Failed to create workflow from goal'
             );
 
             return reply.code(500).send({
                 success: false,
                 error: error instanceof Error ? error.message : 'Unknown error',
+                message: 'Failed to create workflow from goal',
             });
         }
     });
+
+
 
     /**
      * GET /api/v1/goals/:id
@@ -248,7 +204,6 @@ export async function goalRoutes(app: FastifyInstance) {
                     select: {
                         currentPlan: true,
                         lastAgentResult: true,
-                        context: true,
                         lastHistorySeq: true,
                     },
                 },
@@ -277,7 +232,6 @@ export async function goalRoutes(app: FastifyInstance) {
                 id: workflow.id,
                 goal: workflow.goal,
                 status: workflow.status,
-                environment: workflow.environment,
                 traceId: workflow.traceId,
                 currentStep: workflow.currentStep,
                 error: workflow.error,
@@ -285,9 +239,7 @@ export async function goalRoutes(app: FastifyInstance) {
                 createdAt: workflow.createdAt.toISOString(),
                 updatedAt: workflow.updatedAt.toISOString(),
                 startedAt: workflow.startedAt?.toISOString() || null,
-                completedAt: workflow.completedAt?.toISOString() || null,
-                state: workflow.state,
-                lastEvent: workflow.history[0] || null,
+                completedAt: workflow.completedAt?.toISOString() || null
             },
         };
     });
@@ -327,7 +279,6 @@ export async function goalRoutes(app: FastifyInstance) {
                     id: true,
                     goal: true,
                     status: true,
-                    environment: true,
                     traceId: true,
                     createdAt: true,
                     updatedAt: true,

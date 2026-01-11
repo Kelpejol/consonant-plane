@@ -6,19 +6,15 @@ import compress from '@fastify/compress';
 import closeWithGrace from 'close-with-grace';
 import { createServer } from 'http';
 // import { RedisService } from './redis-service';
-// import { QueueService, QueueName } from './queue-service';
-import { randomBytes } from 'crypto';
-// import { ClusterStatus, EventType, AgentRunStatus } from '@prisma/client';
 import { prismaManager, dbPlugin } from './services/db/index.js';
 import { clusterRoutes } from './routes/clusters.route.js';
-import { logger } from './utils/logger.js';
 import { contextManager } from './utils/context.js';
 import { generateUUID } from './utils/crypto.js';
+import { initializeOrchestrator } from './services/orchestrator/engine.js';
 // import { createGrpcServer, GrpcServer } from './services/grpc/server.js';
-
 import { serve } from 'inngest/fastify';
 import { inngest } from './services/inngest/client.js';
-import * as inngestFunctions from './services/inngest/functions/index.js';
+import * as inngestFunctions from './services/inngest/functions/registry.js';
 import { agentRoutes } from './routes/agents.route.js';
 import { goalRoutes } from './routes/goals.route.js';
 
@@ -64,7 +60,6 @@ const app: FastifyInstance = Fastify({
 // ============================================================================
 
 // let redis: RedisService;
-// let queue: QueueService;
 // let grpcServer: GrpcServer | null = null
 
 
@@ -78,118 +73,14 @@ const setupServices = async () => {
   app.log.info('[Server] 🚀 Initializing services...');
 
   // Initialize database
-  app.log.info('[Server] 📊 Connecting to database...');
   await prismaManager.initialize(app.log);
-  app.log.info('[Server] ✓ Database connected');
 
+  // Initialize orchestrator
+  await initializeOrchestrator();
 
-
-
-  //   redis = new RedisService(
-  //     {
-  //       host: REDIS_HOST,
-  //       port: REDIS_PORT,
-  //       password: REDIS_PASSWORD,
-  //       keyPrefix: 'terra:',
-  //     },
-  //     app.log
-  //   );
-  //   await redis.connect();
-
-  //   queue = new QueueService(
-  //     {
-  //       redis: {
-  //         host: REDIS_HOST,
-  //         port: REDIS_PORT,
-  //         password: REDIS_PASSWORD,
-  //       },
-  //     },
-  //     app.log
-  //   );
-  //   await queue.initialize();
-
-  //   setupWorkers();
+  
 };
-
-// const setupWorkers = () => {
-//   queue.createWorker(
-//     QueueName.CLUSTER_REGISTRATION,
-//     async (job) => {
-//       const { clusterId, kagentVersion, kagentConfig } = job.data;
-//       await db.updateClusterStatus(clusterId, ClusterStatus.ACTIVE, kagentVersion, kagentConfig);
-//       await redis.cacheCluster(clusterId, { status: 'active', kagentVersion });
-//       return { success: true };
-//     },
-//     5
-//   );
-
-//   queue.createWorker(
-//     QueueName.AGENT_INVOCATION,
-//     async (job) => {
-//       const { clusterId, requestId, agentName, input, parameters } = job.data;
-
-//       await db.createAgentRun(clusterId, agentName, requestId, input, parameters);
-
-//       const invoked = socketManager.invokeAgent(clusterId, {
-//         requestId,
-//         agentName,
-//         input,
-//         parameters,
-//       });
-
-//       if (!invoked) {
-//         await db.updateAgentRunStatus(requestId, AgentRunStatus.FAILED, null, 'Cluster not connected');
-//         throw new Error('Failed to invoke agent - cluster not connected');
-//       }
-
-//       return { success: true, requestId };
-//     },
-//     10
-//   );
-
-//   queue.createWorker(
-//     QueueName.CLUSTER_HEALTH_CHECK,
-//     async (job) => {
-//       const { clusterId } = job.data;
-//       const cluster = await db.getCluster(clusterId);
-
-//       if (!cluster) {
-//         return { healthy: false, reason: 'Cluster not found' };
-//       }
-
-//       const isConnected = socketManager.isClusterConnected(clusterId);
-
-//       if (!isConnected && cluster.status === ClusterStatus.ACTIVE) {
-//         await db.updateClusterStatus(clusterId, ClusterStatus.INACTIVE);
-//         await redis.invalidateCluster(clusterId);
-//       }
-
-//       return { healthy: isConnected, clusterId };
-//     },
-//     20
-//   );
-
-//   queue.createWorker(
-//     QueueName.EVENT_CLEANUP,
-//     async (job) => {
-//       const { daysToKeep } = job.data;
-//       const deletedCount = await db.cleanupOldEvents(daysToKeep);
-//       return { deletedCount };
-//     },
-//     1
-//   );
-
-//   queue.createWorker(
-//     QueueName.EVENT_PROCESSING,
-//     async (job) => {
-//       const { clusterId, eventType, payload } = job.data;
-//       await db.createEvent(clusterId, eventType as EventType, payload);
-//       await redis.bufferEvent(clusterId, { type: eventType, payload, timestamp: Date.now() });
-//       return { success: true };
-//     },
-//     50
-//   );
-// };
+ 
 
 const setupPlugins = async (server: FastifyInstance) => {
   app.log.info('[Server] 🔌 Registering plugins...');
@@ -223,7 +114,7 @@ const setupPlugins = async (server: FastifyInstance) => {
 };
 
 
-export async function buildApp(app: FastifyInstance) {
+export async function registerEndpoint(app: FastifyInstance) {
   await app.register(clusterRoutes, {
     prefix: '/api/v1',
   });
@@ -232,7 +123,6 @@ export async function buildApp(app: FastifyInstance) {
 
   await app.register(goalRoutes, { prefix: '/api/v1' });
 
-
   // Register Inngest endpoint
   app.all(
     '/api/inngest',
@@ -240,127 +130,9 @@ export async function buildApp(app: FastifyInstance) {
       client: inngest,
       functions: inngestFunctions.allFunctions,
     })
-  );
-
+ );
 }
 
-// const setupSocketHandlers = () => {
-//   socketManager.on('cluster:validate', async (data) => {
-//     app.log.info({ clusterId: data.clusterId }, 'Cluster validation request');
-
-//     const isValid = await db.verifyClusterToken(data.clusterId, data.token);
-//     if (!isValid) {
-//       app.log.error({ clusterId: data.clusterId }, 'Invalid cluster token');
-//     }
-//   });
-
-//   socketManager.on('cluster:registered', async (data) => {
-//     app.log.info({ clusterId: data.clusterId }, 'Cluster registered');
-
-//     await queue.addClusterRegistrationJob({
-//       clusterId: data.clusterId,
-//       clusterName: data.clusterName,
-//       namespace: data.namespace,
-//       kagentVersion: data.kagentVersion,
-//       kagentConfig: data.kagentConfig,
-//     });
-
-//     await redis.trackActiveConnection(data.clusterId);
-//   });
-
-//   socketManager.on('cluster:disconnected', async (data) => {
-//     app.log.warn({ clusterId: data.clusterId }, 'Cluster disconnected');
-//     await redis.removeActiveConnection(data.clusterId);
-//     await redis.invalidateCluster(data.clusterId);
-//   });
-
-//   socketManager.on('cluster:timeout', async (data) => {
-//     app.log.error({ clusterId: data.clusterId }, 'Cluster heartbeat timeout');
-//     await db.updateClusterStatus(data.clusterId, ClusterStatus.INACTIVE);
-//     await redis.removeActiveConnection(data.clusterId);
-//   });
-
-//   socketManager.on('cluster:error', async (data) => {
-//     app.log.error({ clusterId: data.clusterId, error: data }, 'Cluster error');
-//     await queue.addEventProcessingJob({
-//       clusterId: data.clusterId,
-//       eventType: 'CLUSTER_ERROR',
-//       payload: data,
-//     });
-//   });
-
-//   socketManager.on('agent:trace', async (data) => {
-//     await queue.addEventProcessingJob({
-//       clusterId: data.clusterId,
-//       eventType: 'AGENT_TRACE',
-//       payload: data,
-//     });
-//   });
-
-//   socketManager.on('agent:event', async (data) => {
-//     await queue.addEventProcessingJob({
-//       clusterId: data.clusterId,
-//       eventType: 'AGENT_EVENT',
-//       payload: data,
-//     });
-//   });
-
-//   socketManager.on('k8s:event', async (data) => {
-//     await queue.addEventProcessingJob({
-//       clusterId: data.clusterId,
-//       eventType: 'K8S_EVENT',
-//       payload: data,
-//     });
-//   });
-
-//   socketManager.on('k8s:pod:status', async (data) => {
-//     await queue.addEventProcessingJob({
-//       clusterId: data.clusterId,
-//       eventType: 'K8S_POD_STATUS',
-//       payload: data,
-//     });
-//   });
-
-//   socketManager.on('otel:trace', async (data) => {
-//     await queue.addEventProcessingJob({
-//       clusterId: data.clusterId,
-//       eventType: 'OTEL_TRACE',
-//       payload: data,
-//     });
-//   });
-
-//   socketManager.on('otel:metric', async (data) => {
-//     await queue.addEventProcessingJob({
-//       clusterId: data.clusterId,
-//       eventType: 'OTEL_METRIC',
-//       payload: data,
-//     });
-//   });
-
-//   socketManager.on('invoke:response', async (data) => {
-//     app.log.info({ clusterId: data.clusterId, requestId: data.requestId }, 'Invoke response');
-//     await db.updateAgentRunStatus(data.requestId, AgentRunStatus.COMPLETED, data.result);
-//     await queue.addEventProcessingJob({
-//       clusterId: data.clusterId,
-//       eventType: 'INVOKE_RESPONSE',
-//       payload: data,
-//     });
-//   });
-
-//   socketManager.on('invoke:error', async (data) => {
-//     app.log.error({ clusterId: data.clusterId, requestId: data.requestId }, 'Invoke error');
-//     await db.updateAgentRunStatus(data.requestId, AgentRunStatus.FAILED, null, data.error);
-//     await queue.addEventProcessingJob({
-//       clusterId: data.clusterId,
-//       eventType: 'INVOKE_ERROR',
-//       payload: data,
-//     });
-//   });
-// };
-
-// ============================================================================
-// Request Logging Hook
-// ============================================================================
 
 app.addHook('onRequest', (request, reply, done) => {
   const traceId = (request.headers['x-trace-id'] as string) || UUID;
@@ -799,7 +571,7 @@ async function start(): Promise<void> {
     await setupPlugins(app);
 
     // routes
-    await buildApp(app)
+    await registerEndpoint(app)
 
     // Wait for Fastify to be ready
     await app.ready();

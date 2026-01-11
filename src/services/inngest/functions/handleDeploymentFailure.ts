@@ -37,7 +37,7 @@ export const handleAgentFailureFn = inngest.createFunction(
     name: 'Handle Agent Failure',
     retries: 3,
   },
-  { event: 'terra.agent.failed' },
+  { event: 'agent.failed' },
   async ({ event, step }) => {
     const { agentId, stage, error, stackTrace, requestId, retryCount } =
       event.data;
@@ -128,7 +128,7 @@ export const handleAgentFailureFn = inngest.createFunction(
       logger.debug({ agentId }, 'Emitting status-updated event');
 
       await sendEvent({
-        name: 'terra.agent.status-updated',
+        name: 'agent.status-updated',
         data: {
           agentId,
           previousStatus,
@@ -217,7 +217,7 @@ export const handleInngestFunctionFailureFn = inngest.createFunction(
     // Emit terra.agent.failed event
     await step.run('emit-agent-failed-event', async () => {
       await sendEvent({
-        name: 'terra.agent.failed',
+        name: 'agent.failed',
         data: {
           agentId,
           stage,

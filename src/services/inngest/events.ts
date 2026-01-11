@@ -1,284 +1,283 @@
 /**
- * src/inngest/events.ts
+ * @fileoverview Inngest event definitions for  Orchestration
+ * @module services/inngest/events
  * 
- * Type-safe event definitions for Terra platform with Inngest.
+ * @description
+ * Event definitions for Inngest events.
  * 
- * Each event follows Inngest's expected structure with optional user context.
+ * @author Consonant Team
+ * @version 0.1.0
  */
 
-// ============================================================================
-// EVENT DEFINITIONS
-// ============================================================================
+
+import { EventSchemas } from 'inngest';
 
 /**
- * Fired when a new agent is created and validated.
- * Triggers the conversion workflow.
+ * Consonant workflow event types
  */
-export interface AgentCreatedEvent {
-  name: 'terra.agent.created';
-  data: {
-    agentId: string;
-    agentName: string;
-    clusterId: string;
-    requestId: string;
-    createdAt: string;
+export type ConsonantEvents = {
+  // Orchestration control events
+  'workflow.orchestration-trigger': {
+    data: {
+      workflowId: string;
+      traceId: string;
+      trigger: 'initial' | 'resume' | 'retry';
+    };
   };
-  user?: {
-    userId?: string;
-    tenantId?: string;
+
+  // Planner events
+  'workflow.planner-generate': {
+    data: {
+      workflowId: string;
+      goal: string;
+      environment: string;
+      traceId: string;
+    };
   };
-}
-
-/**
- * Fired when agent validation is complete.
- */
-export interface AgentValidatedEvent {
-  name: 'terra.agent.validated';
-  data: {
-    agentId: string;
-    valid: boolean;
-    errors?: string[];
-    warnings?: string[];
-    requestId: string;
+  'workflow.planner-completed': {
+    data: {
+      workflowId: string;
+      plan: any;
+      reasoning: string;
+      traceId: string;
+    };
   };
-}
-
-/**
- * Fired when Terra -> Kagent conversion is complete.
- * Triggers the deployment workflow.
- */
-export interface AgentConvertedEvent {
-  name: 'terra.agent.converted';
-  data: {
-    agentId: string;
-    agentName: string;
-    clusterId: string;
-    success: boolean;
-    error?: string;
-    requestId: string;
+  'workflow.planner-failed': {
+    data: {
+      workflowId: string;
+      error: string;
+      retryable: boolean;
+      traceId: string;
+    };
   };
-}
 
-/**
- * Fired when agent is sent to mediator for deployment.
- */
-export interface AgentDeploymentRequestedEvent {
-  name: 'terra.agent.deployment-requested';
-  data: {
-    agentId: string;
-    clusterId: string;
-    requestId: string;
+  // Policy events
+  'workflow.policy-evaluate': {
+    data: {
+      workflowId: string;
+      plan: any;
+      traceId: string;
+    };
   };
-}
-
-/**
- * Fired when deployment to cluster is complete (from mediator callback).
- */
-export interface AgentDeployedEvent {
-  name: 'terra.agent.deployed';
-  data: {
-    agentId: string;
-    clusterId: string;
-    success: boolean;
-    deploymentId?: string;
-    error?: string;
-    requestId: string;
-    deployedAt: string;
+  'workflow.policy-completed': {
+    data: {
+      workflowId: string;
+      result: 'passed' | 'failed' | 'needs_approval';
+      reason?: string;
+      violations?: string[];
+      traceId: string;
+    };
   };
-}
 
-/**
- * Fired when agent fails at any stage.
- */
-export interface AgentFailedEvent {
-  name: 'terra.agent.failed';
-  data: {
-    agentId: string;
-    stage: 'validation' | 'conversion' | 'deployment';
-    error: string;
-    stackTrace?: string;
-    requestId: string;
-    retryCount: number;
+  // Agent events
+  'workflow.agent-execute': {
+    data: {
+      workflowId: string;
+      plan: any;
+      stepIndex: number;
+      traceId: string;
+    };
   };
-}
-
-/**
- * Fired when agent status needs to be updated.
- */
-export interface AgentStatusUpdateEvent {
-  name: 'terra.agent.status-updated';
-  data: {
-    agentId: string;
-    previousStatus: string;
-    newStatus: string;
-    reason?: string;
-    timestamp: string;
+  'workflow.agent-completed': {
+    data: {
+      workflowId: string;
+      result: {
+        success: boolean;
+        output: any;
+        duration: number;
+        agentId: string;
+      };
+      traceId: string;
+    };
   };
-}
-
-// ============================================================================
-// DEPLOYMENT EVENTS
-// ============================================================================
-
-/**
- * Fired when deployment status changes (from mediator).
- */
-export interface DeploymentStatusChangedEvent {
-  name: 'terra.deployment.status-changed';
-  data: {
-    agentId: string;
-    clusterId: string;
-    deploymentId: string;
-    previousStatus: string;
-    newStatus: string;
-    timestamp: string;
+  'workflow.agent-failed': {
+    data: {
+      workflowId: string;
+      error: string;
+      retryable: boolean;
+      traceId: string;
+    };
   };
-}
 
-// ============================================================================
-// CLUSTER EVENTS
-// ============================================================================
-
-/**
- * Fired when a cluster registers with the platform.
- */
-export interface ClusterRegisteredEvent {
-  name: 'terra.cluster.registered';
-  data: {
-    clusterId: string;
-    clusterName: string;
-    namespace: string;
-    kagentVersion?: string;
-    registeredAt: string;
+  // Human approval events
+  'workflow.human-request-approval': {
+    data: {
+      workflowId: string;
+      plan: any;
+      reason: string;
+      traceId: string;
+    };
   };
-}
-
-/**
- * Fired when cluster connection status changes.
- */
-export interface ClusterConnectionChangedEvent {
-  name: 'terra.cluster.connection-changed';
-  data: {
-    clusterId: string;
-    connected: boolean;
-    reason?: string;
-    timestamp: string;
+  'workflow.human-approved': {
+    data: {
+      workflowId: string;
+      approver: string;
+      comments?: string;
+      traceId: string;
+    };
   };
-}
-
-// ============================================================================
-// SYSTEM EVENTS
-// ============================================================================
-
-/**
- * System health check event.
- */
-export interface SystemHealthCheckEvent {
-  name: 'terra.system.health-check';
-  data: {
-    timestamp: number;
-    source: string;
+  'workflow.human-rejected': {
+    data: {
+      workflowId: string;
+      approver: string;
+      reason: string;
+      traceId: string;
+    };
   };
-}
 
-/**
- * System error event.
- */
-export interface SystemErrorEvent {
-  name: 'terra.system.error';
-  data: {
-    message: string;
-    stackTrace?: string;
-    component: string;
-    severity: 'low' | 'medium' | 'high' | 'critical';
-    timestamp: number;
+  // Control events
+  'workflow.pause': {
+    data: {
+      workflowId: string;
+      reason: string;
+      traceId: string;
+    };
   };
-}
-
-// ============================================================================
-// WORKFLOW ORCHESTRATION EVENTS
-// ============================================================================
-
-/**
- * Fired when a new workflow is created from a goal submission.
- */
-export interface WorkflowCreatedEvent {
-  name: 'terra.workflow.created';
-  data: {
-    workflowId: string;
-    goal: string;
-    environment: string;
-    traceId: string;
-    submittedBy?: string;
-    createdAt: string;
+  'workflow.resume': {
+    data: {
+      workflowId: string;
+      traceId: string;
+    };
   };
-  user?: {
-    userId?: string;
-    tenantId?: string;
+  'workflow.cancel': {
+    data: {
+      workflowId: string;
+      reason: string;
+      traceId: string;
+    };
   };
-}
 
-/**
- * Fired to trigger the orchestration loop for a workflow.
- * This is the main event that drives workflow execution.
- */
-export interface WorkflowOrchestrationTriggerEvent {
-  name: 'terra.workflow.orchestration-trigger';
-  data: {
-    workflowId: string;
-    traceId: string;
-    trigger: 'initial' | 'resume' | 'event_received' | 'retry';
-    eventData?: Record<string, unknown>;
+  // Fired when agent is created
+  'agent.created': {
+    data: {
+      agentId: string;
+      agentName: string;
+      clusterId: string;
+      requestId: string;
+      createdAt: string;
+    };
   };
-}
 
-/**
- * Fired when workflow state changes.
- */
-export interface WorkflowStateChangedEvent {
-  name: 'terra.workflow.state-changed';
-  data: {
-    workflowId: string;
-    previousStatus: string;
-    newStatus: string;
-    reason?: string;
-    timestamp: string;
+  // Fired when agent is validated
+  'agent.validated': {
+    data: {
+      agentId: string;
+      valid: boolean;
+      errors?: string[];
+      warnings?: string[];
+      requestId: string;
+    };
   };
-}
 
-// ============================================================================
-// EVENT REGISTRY
-// ============================================================================
+  // Fired when agent is converted from consonant yaml definition to kagent
+  // Triggers the deployment workflow
+  'agent.converted': {
+    data: {
+      agentId: string;
+      agentName: string;
+      clusterId: string;
+      success: boolean;
+      error?: string;
+      requestId: string;
+    };
+  };
 
-/**
- * Union type of all Terra events.
- * This is what Inngest expects.
- */
-export type TerraEvents = {
-  'terra.agent.created': AgentCreatedEvent;
-  'terra.agent.validated': AgentValidatedEvent;
-  'terra.agent.converted': AgentConvertedEvent;
-  'terra.agent.deployment-requested': AgentDeploymentRequestedEvent;
-  'terra.agent.deployed': AgentDeployedEvent;
-  'terra.agent.failed': AgentFailedEvent;
-  'terra.agent.status-updated': AgentStatusUpdateEvent;
-  'terra.deployment.status-changed': DeploymentStatusChangedEvent;
-  'terra.cluster.registered': ClusterRegisteredEvent;
-  'terra.cluster.connection-changed': ClusterConnectionChangedEvent;
-  'terra.system.health-check': SystemHealthCheckEvent;
-  'terra.system.error': SystemErrorEvent;
-  // Workflow orchestration events
-  'terra.workflow.created': WorkflowCreatedEvent;
-  'terra.workflow.orchestration-trigger': WorkflowOrchestrationTriggerEvent;
-  'terra.workflow.state-changed': WorkflowStateChangedEvent;
+  // Fired when agent is sent to relayer for deployment
+  'agent.deployment-requested': {
+    data: {
+      agentId: string;
+      clusterId: string;
+      requestId: string;
+    };
+  };
+
+  // Fired when deployment to cluster is complete (from relayer callback)
+  'agent.deployed': {
+    data: {
+      agentId: string;
+      clusterId: string;
+      success: boolean;
+      deploymentId?: string;
+      error?: string;
+      requestId: string;
+      deployedAt: string;
+    };
+  };
+
+  // Fired when agent fails at any stage
+  'agent.failed': {
+    data: {
+      agentId: string;
+      stage: 'validation' | 'conversion' | 'deployment';
+      error: string;
+      stackTrace?: string;
+      requestId: string;
+      retryCount: number;
+    };
+  };
+
+  // Fired when agent status needs to be updated
+  'agent.status-updated': {
+    data: {
+      agentId: string;
+      previousStatus: string;
+      newStatus: string;
+      reason?: string;
+      timestamp: string;
+    };
+  };
+
+  // Fired when agent is deleted
+  'agent.deleted': {
+    data: {
+      agentId: string;
+      clusterId: string;
+      requestId: string;
+    };
+  };
+
+  // Fired when deployment status in relayer changes
+  'agent.deployment-status-updated': {
+    data: {
+      agentId: string;
+      clusterId: string;
+      deploymentId: string;
+      previousStatus: string;
+      newStatus: string;
+      timestamp: string;
+    };
+  };
+
+  // Fired when agent deployment is cancelled
+  'agent.deployment-cancelled': {
+    data: {
+      agentId: string;
+      clusterId: string;
+      deploymentId: string;
+      requestId: string;
+    };
+  };
+
+  //Fired when a cluster is registered
+  'cluster.registered': {
+    data: {
+      clusterId: string;
+      clusterName: string;
+      namespace: string;
+      kagentVersion?: string;
+      registeredAt: string;
+    };
+  };
+
+  //Fired when a cluster connection status changes
+  'cluster.connection-changed': {
+    data: {
+      clusterId: string;
+      connected: boolean;
+      reason?: string;
+      timestamp: string;
+    };
+  };
 };
 
-/**
- * Event name type (for autocomplete).
- */
-export type TerraEventName = keyof TerraEvents;
-
-/**
- * Get event payload type by name.
- */
-export type TerraEventPayload<T extends TerraEventName> = TerraEvents[T];
+export const schemas = new EventSchemas().fromRecord<ConsonantEvents>();

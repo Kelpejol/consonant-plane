@@ -1,90 +1,145 @@
 /**
- * src/services/inngest/functions/orchestrator.ts
+ * @fileoverview Orchestrator Inngest Function
+ * @module services/inngest/functions/orchestrator
  * 
- * Inngest function for driving the Terra Orchestration Engine.
- * Handles the "orchestration loop" via durable steps.
+ * @description
+ * Main orchestration function that processes workflow events.
+ * This is the entry point for the event-driven orchestration loop.
+ * 
+ * @architecture
+ * Event arrives → Orchestrator evaluates → Persist → Emit command → Stop
+ * 
+ * @author Terra Infrastructure Team
+ * @version 2.0.0
  */
 
 import { inngest } from '../client.js';
 import { orchestrator } from '../../orchestrator/engine.js';
-import { plannerClient } from '../../planner/client.js';
-import { DecisionType } from '../../orchestrator/types.js';
-import { prismaManager } from '../../db/index.js';
+import { logger } from '../../../utils/logger.js';
 
+// ============================================================================
+// EVENT MAPPING HELPER
+// ============================================================================
+
+/**
+ * Map Inngest event to WorkflowEvent
+ */
+function mapInngestToWorkflowEvent(inngestEvent: any): any {
+  const { name, data } = inngestEvent;
+  const timestamp = Date.now();
+
+  // Map event name to type
+  const eventTypeMap: Record<string, string> = {
+    'workflow.orchestration-trigger': 'ORCHESTRATION_TRIGGER',
+    'workflow.planner-completed': 'PLANNER_COMPLETED',
+    'workflow.planner-failed': 'PLANNER_FAILED',
+    'workflow.policy-completed': 'POLICY_COMPLETED',
+    'workflow.agent-completed': 'AGENT_COMPLETED',
+    'workflow.agent-failed': 'AGENT_FAILED',
+    'workflow.human-approved': 'HUMAN_APPROVED',
+    'workflow.human-rejected': 'HUMAN_REJECTED',
+    'workflow.pause': 'PAUSE',
+    'workflow.resume': 'RESUME',
+    'workflow.cancel': 'CANCEL',
+  };
+
+  return {
+    type: eventTypeMap[name] || 'ORCHESTRATION_TRIGGER',
+    timestamp,
+    ...data,
+  };
+}
+
+// ============================================================================
+// MAIN ORCHESTRATOR FUNCTION
+// ============================================================================
+
+/**
+ * Workflow Orchestrator Function
+ * 
+ * @description
+ * Core orchestration function that processes ALL workflow events.
+ * Uses table-driven decision making for deterministic behavior.
+ * 
+ * **Event Flow**:
+ * 1. Event arrives (any workflow event)
+ * 2. Map to internal event format
+ * 3. Call orchestrator.orchestrate()
+ * 4. Orchestrator evaluates, persists, emits
+ * 5. Function exits (wait for next event)
+ * 
+ * **No loops. No polling. Pure event-driven.**
+ */
 export const workflowOrchestratorFn = inngest.createFunction(
-  { 
-    id: 'workflow-orchestrator', 
-    cancelOn: [
-      { event: 'terra.workflow.state-changed', if: 'async.data.newStatus == "FAILED" || async.data.newStatus == "COMPLETED"' }
-    ]
+  {
+    id: 'workflow-orchestrator',
+    name: 'Workflow Orchestrator',
+
+    // Retry configuration
+    retries: 3,
   },
-  { event: 'terra.workflow.orchestration-trigger' },
-  async ({ event, step, logger }) => {
+
+  // Listen to ALL orchestration events
+  [
+    { event: 'workflow.orchestration-trigger' },
+    { event: 'workflow.planner-completed' },
+    { event: 'workflow.planner-failed' },
+    { event: 'workflow.policy-completed' },
+    { event: 'workflow.agent-completed' },
+    { event: 'workflow.agent-failed' },
+    { event: 'workflow.human-approved' },
+    { event: 'workflow.human-rejected' },
+    { event: 'workflow.pause' },
+    { event: 'workflow.resume' },
+    { event: 'workflow.cancel' },
+  ],
+
+  async ({ event, step }) => {
     const { workflowId, traceId } = event.data;
 
-    logger.info({ workflowId, traceId }, 'Orchestration loop triggered');
+    logger.info(
+      { workflowId, traceId, eventType: event.name },
+      '[Orchestrator Function] Event received'
+    );
 
-    // 1. Evaluate current state using the Core Orchestrator
-    // This step is durable and retriable
-    const result = await step.run('evaluate-state', async () => {
-      // Ensure DB client is ready
-      await prismaManager.getClient();
-      return await orchestrator.runOrchestration(workflowId, traceId);
+    // =========================================================================
+    // STEP: Run orchestration cycle
+    // =========================================================================
+    const result = await step.run('orchestrate', async () => {
+
+      // Map Inngest event to WorkflowEvent type
+      const workflowEvent = mapInngestToWorkflowEvent(event);
+
+      // Execute orchestration cycle
+      return await orchestrator.orchestrate(workflowId, workflowEvent);
     });
 
+    // =========================================================================
+    // Handle result
+    // =========================================================================
     if (!result) {
-      logger.info({ workflowId }, 'Orchestration yielded no result (paused or terminal)');
-      return;
+      logger.info({ workflowId }, '[Orchestrator] Workflow paused or terminal');
+      return { skipped: true, reason: 'Workflow paused or terminal' };
     }
 
-    const { decision } = result;
-    logger.info({ workflowId, decision: decision.type }, 'Handling decision');
+    logger.info(
+      {
+        workflowId,
+        decision: result.decision.type,
+        newStatus: result.newStatus,
+        commandEmitted: !!result.command,
+      },
+      '[Orchestrator] Cycle completed'
+    );
 
-    // 2. Act on the decision
-    switch (decision.type) {
-      case DecisionType.NEEDS_PLANNING:
-        await step.run('handle-planning', async () => {
-          logger.info({ workflowId }, 'Delegating to Planner Service');
-          
-          // A. Fetch goal (could pass in event, but fetching from DB/result is safer)
-          // Result doesn't have goal. We rely on plannerClient fetching if needed or pass payload.
-          // In my evaluator, payload had goal.
-          const goal = (decision.payload as any)?.goal;
-          
-          if (!goal) {
-            throw new Error('Goal missing in decision payload');
-          }
-
-          // B. Generate Plan (External gRPC call)
-          const plan = await plannerClient.generatePlan(goal, workflowId);
-          
-          // C. Apply Plan (DB Update)
-          await orchestrator.applyPlan(workflowId, plan, traceId);
-        });
-
-        // D. Loop: Trigger next iteration immediately to execute the plan
-        await step.sendEvent('continue-orchestration', {
-          name: 'terra.workflow.orchestration-trigger',
-          data: {
-            workflowId,
-            traceId,
-            trigger: 'resume'
-          }
-        });
-        break;
-
-      case DecisionType.GOAL_ACHIEVED:
-      case DecisionType.FAILED:
-        logger.info({ workflowId, status: decision.type }, 'Workflow completed');
-        break;
-
-      case DecisionType.WAIT:
-        logger.info({ workflowId }, 'Workflow waiting for external event');
-        // In future: await step.waitForEvent(...)
-        break;
-        
-      default:
-        logger.warn({ workflowId, type: decision.type }, 'Unhandled decision type');
-    }
+    return {
+      success: true,
+      workflowId: result.workflowId,
+      decision: result.decision.type,
+      newStatus: result.newStatus,
+      commandEmitted: !!result.command,
+      timestamp: result.timestamp,
+    };
   }
 );
+

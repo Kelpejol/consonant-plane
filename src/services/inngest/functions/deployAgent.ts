@@ -14,7 +14,7 @@ export const deployKagentAgentFn = inngest.createFunction(
     name: 'Deploy Kagent Agent to Cluster',
     retries: 3,
   },
-  { event: 'terra.agent.converted' },
+  { event: 'agent.converted' },
   async ({ event, step }) => {
     const { agentId, clusterId, requestId } = event.data;
 
@@ -77,7 +77,7 @@ export const deployKagentAgentFn = inngest.createFunction(
     // Step 5: Emit deployed event
     await step.run('emit-deployed-event', async () => {
       await sendEvent({
-        name: 'terra.agent.deployed',
+        name: 'agent.deployed',
         data: {
           agentId,
           clusterId,

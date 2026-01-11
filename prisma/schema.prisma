@@ -224,15 +224,9 @@ enum WorkflowStatus {
 model Workflow {
   id              String          @id @default(uuid())
   goal            String          // Natural language goal submitted by user
+  context         String          @default("") // added context to goal
   status          WorkflowStatus  @default(CREATED)
-  
-  // Idempotency - ensures retried goal submissions return same workflow
-  idempotencyKey  String?         @unique
-  
-  // Context
-  environment     String          @default("default")
-  submittedBy     String?         // User/service that submitted the goal
-  
+
   // OpenTelemetry tracing
   traceId         String          @unique  // Trace ID for distributed tracing
   rootSpanId      String?         // Root span for this workflow
@@ -257,8 +251,6 @@ model Workflow {
   @@index([status])
   @@index([traceId])
   @@index([createdAt])
-  @@index([submittedBy])
-  @@index([environment, status])
   @@map("workflows")
 }
 
@@ -307,7 +299,7 @@ model WorkflowState {
   // Current execution state
   currentPlan     Json?           // Current plan from LangGraph
   lastAgentResult Json?           // Last agent execution result
-  context         Json            @default("{}")  // Accumulated execution context
+  execContext     Json            @default("{}")  // Accumulated execution context
   
   // Replay support - last applied history sequence
   lastHistorySeq  Int             @default(0)
@@ -317,8 +309,27 @@ model WorkflowState {
   
   // Relation
   workflow        Workflow        @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+
+
   
   @@map("workflow_states")
 }
 
+
+ /* currentPlan: null,
+    lastAgentResult: null,
+    context: {
+    workflowId,
+    goal,
+    traceId,
+    plan: null,
+    lastAgentResult: null,
+    retryCount: 0,
+    maxRetries: maxRetries!,
+    errors: [],
+    metadata,
+    startedAt: Date.now(),
+    updatedAt: Date.now(),
+    } as any,
+*/
 

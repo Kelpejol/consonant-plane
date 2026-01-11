@@ -41,7 +41,7 @@ export const handleDeploymentConfirmationFn = inngest.createFunction(
     name: 'Handle Deployment Confirmation from Mediator',
     retries: 3,
   },
-  { event: 'terra.agent.deployed' },
+  { event: 'agent.deployed' },
   async ({ event, step }) => {
     const {
       agentId,
@@ -142,7 +142,7 @@ export const handleDeploymentConfirmationFn = inngest.createFunction(
       logger.debug({ agentId }, 'Emitting status-updated event');
 
       await sendEvent({
-        name: 'terra.agent.status-updated',
+        name: 'agent.status-updated',
         data: {
           agentId,
           previousStatus,

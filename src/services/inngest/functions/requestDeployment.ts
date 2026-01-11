@@ -24,7 +24,6 @@
 import { inngest } from '../client.js';
 import { sendEvent } from '../client.js';
 import { logger } from '../../../utils/logger.js';
-import type { KagentCRD } from '../../../types/agentManifest.js';
 import { sendKagentCRDToMediator } from '@/services/grpc/client.js';
 import { prismaManager } from '@/services/db/manager.js';
 
@@ -47,7 +46,7 @@ export const requestDeploymentFn = inngest.createFunction(
     name: 'Request Agent Deployment to Cluster',
     retries: 3,
   },
-  { event: 'terra.agent.converted' },
+  { event: 'agent.converted' },
   async ({ event, step }) => {
     const { agentId, clusterId, requestId, success } = event.data;
 
@@ -161,7 +160,7 @@ export const requestDeploymentFn = inngest.createFunction(
       logger.debug({ agentId }, 'Emitting deployment-requested event');
 
       await sendEvent({
-        name: 'terra.agent.deployment-requested',
+        name: 'agent.deployment-requested',
         data: {
           agentId,
           clusterId,

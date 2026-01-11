@@ -33,43 +33,13 @@ export const GoalSubmissionSchema = z.object({
         .min(1, 'Goal must be at least 1 character'),
 
     /**
-     * Target environment for workflow execution.
-     * Affects policy evaluation and agent selection.
-     */
-    environment: z
-        .string()
-        .min(1, 'Environment cannot be empty')
-        .max(64, 'Environment cannot exceed 64 characters')
-        .regex(
-            /^[a-z0-9-]+$/,
-            'Environment must be lowercase alphanumeric with hyphens'
-        )
-        .default('default'),
-
-    /**
-     * Optional idempotency key for retry-safe goal submission.
-     * If provided and matches an existing workflow, returns the existing workflow.
-     */
-    idempotencyKey: z
-        .uuid('Idempotency key must be a valid UUID')
-        .optional(),
-
-    /**
      * Optional metadata to attach to the workflow.
      * Can be used for custom routing, labeling, or audit purposes.
      */
-    metadata: z
-        .record(z.string(), z.unknown())
+    context: z
+        .string()
         .optional(),
 
-    /**
-     * Optional user identifier who submitted the goal.
-     * Used for audit trails and access control.
-     */
-    submittedBy: z
-        .string()
-        .max(256, 'submittedBy cannot exceed 256 characters')
-        .optional(),
 });
 
 /**

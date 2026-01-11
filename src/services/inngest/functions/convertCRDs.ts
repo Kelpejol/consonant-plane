@@ -45,7 +45,7 @@ export const convertTerraToKagentFn = inngest.createFunction(
     //   period: '1m',
     // },
   },
-  { event: 'terra.agent.created' },
+  { event: 'agent.created' },
   async ({ event, step }) => {
     const { agentId, agentName, clusterId, requestId } = event.data;
 
@@ -147,7 +147,7 @@ export const convertTerraToKagentFn = inngest.createFunction(
       logger.debug({ agentId }, 'Emitting agent converted event');
 
       await sendEvent({
-        name: 'terra.agent.converted',
+        name: 'agent.converted',
         data: {
           agentId,
           agentName,
