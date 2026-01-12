@@ -26,10 +26,18 @@ export const plannerFunction = inngest.createFunction(
       // For now, generate a simple mock plan
       
       const plan = await step.run('generate-plan', async () => {
-        
-        const plan = await plannerClient.generatePlan(goal, workflowId);
-            
-        return plan;
+        return await plannerClient.generatePlan(goal, workflowId);
+      });
+
+      // Emit completion event back to orchestrator
+      await step.sendEvent('planner-completed', {
+        name: 'workflow.planner-completed',
+        data: {
+          workflowId: event.data.workflowId,
+          plan,
+          reasoning: 'Generated plan successfully',
+          traceId: event.data.traceId,
+        },
       });
 
       return { success: true, plan };

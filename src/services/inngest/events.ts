@@ -30,7 +30,6 @@ export type ConsonantEvents = {
     data: {
       workflowId: string;
       goal: string;
-      environment: string;
       traceId: string;
     };
   };

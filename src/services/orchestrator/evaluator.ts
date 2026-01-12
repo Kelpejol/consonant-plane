@@ -126,14 +126,14 @@ function isDuplicateEvent(state: WorkflowState, event: WorkflowEvent): boolean {
  * Check for stale event
  * 
  * @description
- * Events with version numbers less than the current state version
+ * Events with tick less than the current state tick
  * are stale and should be ignored.
  */
 function isStaleEvent(state: WorkflowState, event: WorkflowEvent): boolean {
-  if (event.version === undefined) {
+  if (event.tick === undefined) {
     return false;
   }
-  return event.version < state.state.tick;
+  return event.tick < state.state.tick;
 }
 
 // ============================================================================

@@ -17,7 +17,7 @@ import { inngest } from '../client.js';
 import { orchestrator } from '../../orchestrator/engine.js';
 import { logger } from '../../../utils/logger.js';
 import { WorkflowEvent } from '@/services/orchestrator/types.js';
-import { ConsonantEvents } from '../events.js';
+
 
 // ============================================================================
 // EVENT MAPPING HELPER

@@ -78,7 +78,6 @@ export async function emitOrchestrationCommand(
       workflowId,
       traceId,
       ...command.payload,
-     
     };
 
     // Send event to Inngest

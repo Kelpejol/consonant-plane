@@ -62,7 +62,7 @@ export interface WorkflowEvent {
   readonly type: EventType;
   readonly timestamp: number;
   readonly sequence?: number;
-  readonly version?: number;
+  readonly  tick?: number;
 }
 
 /**
