@@ -50,7 +50,7 @@ export const plannerFunction = inngest.createFunction(
         data: {
           workflowId: event.data.workflowId,
           error: errorMessage,
-          retryable: true,
+          retryable: false,
           traceId: event.data.traceId,
         },
       });

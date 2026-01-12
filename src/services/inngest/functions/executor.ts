@@ -143,7 +143,7 @@ export const agentExecutorFn = inngest.createFunction(
         data: {
           workflowId,
           error: errorMessage,
-          retryable: true, // Most agent failures are retryable
+          retryable: false, // Most agent failures are retryable
           traceId,
         },
       });
