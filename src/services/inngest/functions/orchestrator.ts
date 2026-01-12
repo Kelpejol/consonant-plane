@@ -72,75 +72,82 @@ function mapInngestToWorkflowEvent(inngestEvent: any): WorkflowEvent {
  * 
  * **No loops. No polling. Pure event-driven.**
  */
-export const workflowOrchestratorFn = inngest.createFunction(
+/**
+ * Workflow Lifecycle Function
+ * Handles: trigger, pause, resume, cancel, human-approved, human-rejected
+ */
+export const workflowLifecycleFn = inngest.createFunction(
   {
-    id: 'workflow-orchestrator',
-    name: 'Workflow Orchestrator',
-    // Retry configuration
+    id: 'workflow-lifecycle',
+    name: 'Workflow Lifecycle',
     retries: 3,
   },
-
-  // Listen to ALL orchestration events
   [
     { event: 'workflow.orchestration-trigger' },
-    { event: 'workflow.planner-completed' },
-    { event: 'workflow.planner-failed' },
-    { event: 'workflow.policy-completed' },
-    { event: 'workflow.agent-completed' },
-    { event: 'workflow.agent-failed' },
     { event: 'workflow.human-approved' },
     { event: 'workflow.human-rejected' },
     { event: 'workflow.pause' },
     { event: 'workflow.resume' },
     { event: 'workflow.cancel' },
   ],
-
   async ({ event, step }) => {
     const { workflowId, traceId } = event.data;
+    logger.info({ workflowId, traceId, eventType: event.name }, '[Orchestrator Lifecycle] Event received');
 
-    logger.info(
-      { workflowId, traceId, eventType: event.name },
-      '[Orchestrator Function] Event received'
-    );
-
-    // =========================================================================
-    // STEP: Run orchestration cycle
-    // =========================================================================
     const result = await step.run('orchestrate', async () => {
-
-      // Map Inngest event to WorkflowEvent type
       const workflowEvent = mapInngestToWorkflowEvent(event);
-
-      // Execute orchestration cycle
       return await orchestrator.orchestrate(workflowId, workflowEvent);
     });
 
-    // =========================================================================
-    // Handle result
-    // =========================================================================
-    if (!result) {
-      logger.info({ workflowId }, '[Orchestrator] Workflow paused or terminal');
-      return { skipped: true, reason: 'Workflow paused or terminal' };
-    }
-
-    logger.info(
-      {
-        workflowId,
-        decision: result.decision.type,
-        newStatus: result.newStatus,
-        commandEmitted: !!result.command,
-      },
-      '[Orchestrator] Cycle completed'
-    );
-
-    return {
-      success: true,
-      workflowId: result.workflowId,
-      decision: result.decision.type,
-      newStatus: result.newStatus,
-      commandEmitted: !!result.command,
-      timestamp: result.timestamp,
-    };
+    return handleOrchestrationResult(result);
   }
 );
+
+/**
+ * Workflow Execution Function
+ * Handles: planner-completed, planner-failed, policy-completed, agent-completed, agent-failed
+ */
+export const workflowExecutionFn = inngest.createFunction(
+  {
+    id: 'workflow-execution',
+    name: 'Workflow Execution',
+    retries: 3,
+  },
+  [
+    { event: 'workflow.planner-completed' },
+    { event: 'workflow.planner-failed' },
+    { event: 'workflow.policy-completed' },
+    { event: 'workflow.agent-completed' },
+    { event: 'workflow.agent-failed' },
+  ],
+  async ({ event, step }) => {
+    const { workflowId, traceId } = event.data;
+    logger.info({ workflowId, traceId, eventType: event.name }, '[Orchestrator Execution] Event received');
+
+    const result = await step.run('orchestrate', async () => {
+      const workflowEvent = mapInngestToWorkflowEvent(event);
+      return await orchestrator.orchestrate(workflowId, workflowEvent);
+    });
+
+    return handleOrchestrationResult(result);
+  }
+);
+
+/**
+ * Common result handler for orchestration functions
+ */
+function handleOrchestrationResult(result: any) {
+  if (!result) {
+    return { skipped: true, reason: 'Workflow paused or terminal' };
+  }
+
+  return {
+    success: true,
+    workflowId: result.workflowId,
+    decision: result.decision.type,
+    newStatus: result.newStatus,
+    commandEmitted: !!result.command,
+    timestamp: result.timestamp,
+  };
+}
 

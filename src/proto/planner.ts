@@ -1,5 +1,5 @@
 /**
- * src/services/planner/client.ts
+ * src/proto/planner.ts
  * 
  * gRPC Client for the Python Planner Service.
  * Uses dynamic proto loading to communicate with the Planner.
@@ -16,10 +16,11 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // Path to proto file
-// consonant/plane/src/services/planner -> consonant/proto/...
-// ../../../.. goes to consonant root
+// consonant/plane/src/proto -> consonant/proto/...
+// ../../../ goes to consonant root
 console.log('DEBUG [client.ts]: __dirname =', __dirname);
-const PROTO_PATH = path.resolve(__dirname, '../../../../proto/consonant-grpc-proto/proto/v1/planner.proto');
+const PROTO_PATH = path.resolve(__dirname, '../../../proto/consonant-grpc-proto/proto/v1/planner.proto');
+const PROTO_DIR = path.dirname(PROTO_PATH);
 console.log('DEBUG [client.ts]: PROTO_PATH =', PROTO_PATH);
 
 const packageDefinition = protoLoader.loadSync(PROTO_PATH, {
@@ -28,6 +29,7 @@ const packageDefinition = protoLoader.loadSync(PROTO_PATH, {
     enums: String,
     defaults: true,
     oneofs: true,
+    includeDirs: [PROTO_DIR]
 });
 
 const protoDescriptor = grpc.loadPackageDefinition(packageDefinition) as any;

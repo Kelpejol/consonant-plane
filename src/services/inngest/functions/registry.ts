@@ -26,7 +26,7 @@ import {
   handleAgentFailureFn,
   handleInngestFunctionFailureFn,
 } from './handleDeploymentFailure.js';
-import { workflowOrchestratorFn } from './orchestrator.js';
+import { workflowLifecycleFn, workflowExecutionFn } from './orchestrator.js';
 
 /**
  * Array of all functions for easy registration with Inngest.
@@ -49,7 +49,8 @@ export const allFunctions = [
   handleDeploymentConfirmationFn,
   handleAgentFailureFn,
   handleInngestFunctionFailureFn,
-  workflowOrchestratorFn,
+  workflowLifecycleFn,
+  workflowExecutionFn,
   plannerFunction,
   policyEvaluatorFn,
   agentExecutorFn,

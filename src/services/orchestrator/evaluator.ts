@@ -71,7 +71,7 @@ export function deriveFacts(state: WorkflowState): DerivedFacts {
   const planJson = state.plan?.plan as unknown as WorkflowPlan | null;
   const lastAgentResult = state.state.lastAgentResult as unknown as AgentResult | null;
 
-  const hasPlan = planJson !== null && planJson.steps.length > 0;
+  const hasPlan = !!planJson && !!planJson.steps && planJson.steps.length > 0;
 
   const completedSteps = hasPlan
     ? planJson!.steps.filter(s => s.status === 'completed').length
