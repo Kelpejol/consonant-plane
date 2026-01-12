@@ -36,6 +36,8 @@ import type {
   Decision,
   DerivedFacts,
   EvalContext,
+  WorkflowPlan,
+  AgentResult,
 } from './types.js';
 import { noop, fail, isTerminal } from './types.js';
 import { TRANSITIONS } from './transitions.js';
@@ -66,26 +68,29 @@ import { TRANSITIONS } from './transitions.js';
  * ```
  */
 export function deriveFacts(state: WorkflowState): DerivedFacts {
-  const hasPlan = state.plan !== null && state.plan.steps.length > 0;
-  
+  const planJson = state.plan?.plan as unknown as WorkflowPlan | null;
+  const lastAgentResult = state.state.lastAgentResult as unknown as AgentResult | null;
+
+  const hasPlan = planJson !== null && planJson.steps.length > 0;
+
   const completedSteps = hasPlan
-    ? state.plan!.steps.filter(s => s.status === 'completed').length
+    ? planJson!.steps.filter(s => s.status === 'completed').length
     : 0;
-  
-  const totalSteps = hasPlan ? state.plan!.steps.length : 0;
-  
+
+  const totalSteps = hasPlan ? planJson!.steps.length : 0;
+
   const currentStepIndex = completedSteps;
-  
+
   const hasRemainingSteps = hasPlan && completedSteps < totalSteps;
-  
+
   const allStepsCompleted = hasPlan && completedSteps === totalSteps;
-  
-  const lastStepFailed = state.lastAgentResult?.success === false;
-  
-  const retriesExhausted = state.retryCount >= state.maxRetries;
-  
+
+  const lastStepFailed = lastAgentResult?.success === false;
+
+  const retriesExhausted = state.state.retryCount >= state.state.maxRetries;
+
   // TODO: Add policy evaluation logic
-  const needsPolicyEvaluation = hasPlan && state.environment === 'production';
+  const needsPolicyEvaluation = hasPlan;
 
   return {
     hasPlan,
@@ -114,7 +119,7 @@ function isDuplicateEvent(state: WorkflowState, event: WorkflowEvent): boolean {
   if (event.sequence === undefined) {
     return false;
   }
-  return event.sequence <= state.lastHistorySeq;
+  return event.sequence <= state.state.lastHistorySeq;
 }
 
 /**
@@ -128,7 +133,7 @@ function isStaleEvent(state: WorkflowState, event: WorkflowEvent): boolean {
   if (event.version === undefined) {
     return false;
   }
-  return event.version < state.version;
+  return event.version < state.state.tick;
 }
 
 // ============================================================================
@@ -196,14 +201,14 @@ export function evaluate(
   const facts = deriveFacts(state);
 
   // ===== STEP 2: Look up transition in table =====
-  const stateTransitions = TRANSITIONS[state.status];
-  
+  const stateTransitions = (TRANSITIONS)[state.status];
+
   if (!stateTransitions) {
     return fail(`No transitions defined for status: ${state.status}`);
   }
 
   const handler = stateTransitions[event.type];
-  
+
   if (!handler) {
     return noop(`Event ${event.type} not handled in status ${state.status}`);
   }
@@ -224,19 +229,19 @@ export function evaluate(
 }
 
 // ============================================================================
-// APPLY DECISION (STATE TRANSITION)
+//  Build New State
 // ============================================================================
 
 /**
- * Apply decision to state to produce new state
+ * Build new state from decision
  * 
  * @description
- * This function applies a decision to create the next state.
+ * This function builds a new state from a decision.
  * It's pure - it doesn't mutate the input state.
  * 
  * **Separation of concerns**:
  * - Evaluator decides what to do
- * - This function applies the decision
+ * - This function builds the new state
  * 
  * This separation enables:
  * - Replay (evaluate without applying)
@@ -251,11 +256,11 @@ export function evaluate(
  * @example
  * ```typescript
  * const decision = evaluate(state, event);
- * const newState = applyDecision(state, decision, event);
+ * const newState = buildNewState(state, decision, event);
  * await persistState(newState);
  * ```
  */
-export function applyDecision(
+export function buildNewState(
   state: WorkflowState,
   decision: Decision,
   event: WorkflowEvent
@@ -269,9 +274,13 @@ export function applyDecision(
   const newState: WorkflowState = {
     ...state,
     status: decision.nextStatus,
-    version: state.version + 1,
-    lastHistorySeq: event.sequence ?? state.lastHistorySeq + 1,
-    updatedAt: Date.now(),
+    state: {
+      ...state.state,
+      tick: state.state.tick + 1,
+      lastHistorySeq: event.sequence ?? state.state.lastHistorySeq + 1,
+      updatedAt: new Date(),
+    },
+    updatedAt: new Date(),
   };
 
   // Type-specific updates
@@ -290,7 +299,7 @@ export function applyDecision(
 
     case 'FAIL':
       // Add error to errors array
-      newState.errors = [...state.errors, decision.error];
+      newState.state.errors = [...state.state.errors, decision.error];
       break;
   }
 

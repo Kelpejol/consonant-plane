@@ -7,7 +7,7 @@
 import { Inngest, EventSchemas } from 'inngest';
 import { logger } from '../../utils/logger.js';
 import { schemas, ConsonantEvents } from './events.js';
-import { WorkflowCommand } from '../orchestrator/types.js';
+import { Command } from '../orchestrator/types.js';
 
 // ============================================================================
 // CONFIGURATION
@@ -62,7 +62,7 @@ export const inngest = new Inngest({
  */
 export async function emitOrchestrationCommand(
   workflowId: string,
-  command: WorkflowCommand,
+  command: Command,
   traceId: string,
 ): Promise<void> {
   logger.info(

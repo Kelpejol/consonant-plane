@@ -9,13 +9,15 @@
  * @architecture
  * Event arrives → Orchestrator evaluates → Persist → Emit command → Stop
  * 
- * @author Terra Infrastructure Team
- * @version 2.0.0
+ * @author Consonant Team
+ * @version 0.1.0
  */
 
 import { inngest } from '../client.js';
 import { orchestrator } from '../../orchestrator/engine.js';
 import { logger } from '../../../utils/logger.js';
+import { WorkflowEvent } from '@/services/orchestrator/types.js';
+import { ConsonantEvents } from '../events.js';
 
 // ============================================================================
 // EVENT MAPPING HELPER
@@ -24,7 +26,7 @@ import { logger } from '../../../utils/logger.js';
 /**
  * Map Inngest event to WorkflowEvent
  */
-function mapInngestToWorkflowEvent(inngestEvent: any): any {
+function mapInngestToWorkflowEvent(inngestEvent: any): WorkflowEvent {
   const { name, data } = inngestEvent;
   const timestamp = Date.now();
 
@@ -74,7 +76,6 @@ export const workflowOrchestratorFn = inngest.createFunction(
   {
     id: 'workflow-orchestrator',
     name: 'Workflow Orchestrator',
-
     // Retry configuration
     retries: 3,
   },

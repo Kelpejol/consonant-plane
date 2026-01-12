@@ -52,31 +52,31 @@ interface GoalSubmissionResponse {
 // ============================================================================
 
 export async function goalRoutes(app: FastifyInstance) {
-   /**
- * POST /goals - Submit a new workflow goal
- * 
- * @description
- * Entry point for workflow creation.
- * 
- * **Flow**:
- * 1. Validate request
- * 2. Create workflow record in database
- * 3. Emit orchestration.trigger event
- * 4. Return workflow ID
- * 
- * **Important**: This does NOT run orchestration synchronously.
- * Orchestration happens asynchronously via Inngest events.
- * 
- * @param req - Express request
- * @param res - Express response
- * 
- * @example
- * ```bash
- * curl -X POST http://localhost:3000/goals \
- *   -H "Content-Type: application/json" \
- *   -d '{"goal": "Deploy application to production"}'
- * ```
- */
+    /**
+  * POST /goals - Submit a new workflow goal
+  * 
+  * @description
+  * Entry point for workflow creation.
+  * 
+  * **Flow**:
+  * 1. Validate request
+  * 2. Create workflow record in database
+  * 3. Emit orchestration.trigger event
+  * 4. Return workflow ID
+  * 
+  * **Important**: This does NOT run orchestration synchronously.
+  * Orchestration happens asynchronously via Inngest events.
+  * 
+  * @param req - Express request
+  * @param res - Express response
+  * 
+  * @example
+  * ```bash
+  * curl -X POST http://localhost:3000/goals \
+  *   -H "Content-Type: application/json" \
+  *   -d '{"goal": "Deploy application to production"}'
+  * ```
+  */
     app.post('/goals', async (request: FastifyRequest, reply: FastifyReply) => {
         const startTime = Date.now();
 
@@ -87,7 +87,7 @@ export async function goalRoutes(app: FastifyInstance) {
             if (!validation.valid) {
                 logger.warn(
                     { errors: validation.errors },
-                   '[Goal Route] Goal submission validation failed'
+                    '[Goal Route] Goal submission validation failed'
                 );
                 return reply.code(400).send({
                     success: false,
@@ -99,7 +99,7 @@ export async function goalRoutes(app: FastifyInstance) {
             const { goal, context } = validation.data as GoalSubmissionRequest;
 
             logger.info('[Goal Route] Creating workflow');
-         
+
             // Generate trace ID for distributed tracing
             // Use request header if provided, otherwise generate new
             const traceId =
@@ -157,7 +157,7 @@ export async function goalRoutes(app: FastifyInstance) {
 
             // Emit orchestration trigger event
             // This will be picked up by the orchestration loop and start the workflow
-          await emitOrchestrationTrigger(workflow.id, traceId, 'initial');
+            await emitOrchestrationTrigger(workflow.id, traceId, 'initial');
 
             return reply.code(201).send({
                 success: true,
@@ -202,9 +202,12 @@ export async function goalRoutes(app: FastifyInstance) {
             include: {
                 state: {
                     select: {
-                        currentPlan: true,
                         lastAgentResult: true,
                         lastHistorySeq: true,
+                        retryCount: true,
+                        errors: true,
+                        currentStep: true,
+                        errorCount: true,
                     },
                 },
                 history: {
@@ -233,9 +236,9 @@ export async function goalRoutes(app: FastifyInstance) {
                 goal: workflow.goal,
                 status: workflow.status,
                 traceId: workflow.traceId,
-                currentStep: workflow.currentStep,
-                error: workflow.error,
-                errorCount: workflow.errorCount,
+                currentStep: (workflow.state as any)?.currentStep || 0,
+                errors: (workflow.state as any)?.errors || [],
+                errorCount: (workflow.state as any)?.errorCount || 0,
                 createdAt: workflow.createdAt.toISOString(),
                 updatedAt: workflow.updatedAt.toISOString(),
                 startedAt: workflow.startedAt?.toISOString() || null,
@@ -264,9 +267,6 @@ export async function goalRoutes(app: FastifyInstance) {
 
         if (query.status) {
             where.status = query.status as WorkflowStatus;
-        }
-        if (query.environment) {
-            where.environment = query.environment;
         }
 
         const [workflows, total] = await Promise.all([

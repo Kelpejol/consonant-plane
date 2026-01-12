@@ -1,5 +1,5 @@
 /**
- * @fileoverview Terra Workflow Orchestration Engine
+ * @fileoverview Consonant Workflow Orchestration Engine
  * @module orchestrator/engine
  * 
  * @description
@@ -12,7 +12,7 @@
  * orchestrate(workflowId, event) {
  *   1. Load state from database
  *   2. Evaluate => decision
- *   3. Apply decision => new state
+ *   3. Build new state
  *   4. Persist new state
  *   5. Emit command (if needed)
  *   6. Return result
@@ -22,19 +22,20 @@
  * **Key principle**: ONE decision per invocation.
  * No loops. No polling. Progress driven by events.
  * 
- * @author Terra Infrastructure Team
- * @version 2.0.0 (Table-Driven)
+ * @author Consonant Team
+ * @version 0.1.0 (Table-Driven)
  */
 
 import type { PrismaClient } from '@prisma/client';
 import type {
-    WorkflowState,
     WorkflowEvent,
     OrchestrationResult,
-    WorkflowCommand,
+    WorkflowState,
+    Decision,
 } from './types.js';
-import { evaluate, applyDecision, requiresCommand, extractCommand } from './evaluator.js';
-import { emitOrchestrationCommand} from '../inngest/client.js';
+import { isTerminal } from './types.js';
+import { evaluate, buildNewState, extractCommand } from './evaluator.js';
+import { emitOrchestrationCommand } from '../inngest/client.js';
 import { logger } from '../../utils/logger.js';
 import { prismaManager } from '../db/manager.js';
 
@@ -74,7 +75,7 @@ export class OrchestrationEngine {
      * This is the heart of the orchestration engine:
      * 1. Load workflow from database
      * 2. Evaluate (state, event) => decision
-     * 3. Apply decision => new state
+     * 3. Build new state
      * 4. Persist new state + history
      * 5. Emit command (if needed)
      * 6. Return result
@@ -99,25 +100,22 @@ export class OrchestrationEngine {
 
         try {
             // =====================================================================
-            // STEP 1: Load workflow state from database
+            // STEP 1: Load workflow from database
             // =====================================================================
-            const state = await this.loadWorkflowState(workflowId);
+            const workflow = await this.loadWorkflow(workflowId);
 
-            if (!state) {
-                throw new Error(`Workflow ${workflowId} not found`);
-            }
-
-            const previousStatus = state.status;
+            // Get status as at now so we can use for previous status param
+            const previousStatus = workflow.status;
 
             // =====================================================================
             // STEP 2: Evaluate (state, event) => decision
             // =====================================================================
             logger.debug(
-                { workflowId, status: state.status, eventType: event.type },
+                { workflowId, status: workflow.status, eventType: event.type },
                 '[Engine] Evaluating decision'
             );
 
-            const decision = evaluate(state, event);
+            const decision = evaluate(workflow, event);
 
             logger.info(
                 { workflowId, decisionType: decision.type },
@@ -125,14 +123,14 @@ export class OrchestrationEngine {
             );
 
             // =====================================================================
-            // STEP 3: Apply decision => new state
+            // STEP 3: Build new state
             // =====================================================================
-            const newState = applyDecision(state, decision, event);
+            const newState = buildNewState(workflow, decision, event);
 
             // =====================================================================
             // STEP 4: Persist new state + history
             // =====================================================================
-            await this.persistState(newState, decision, event);
+            await this.persistState(workflow, newState, decision, event);
 
             // =====================================================================
             // STEP 5: Emit command (if needed)
@@ -140,7 +138,7 @@ export class OrchestrationEngine {
             const command = extractCommand(decision);
 
             if (command) {
-            await emitOrchestrationCommand(workflowId, command, state.traceId);
+                await emitOrchestrationCommand(workflowId, command, workflow.traceId);
             }
 
             // =====================================================================
@@ -151,7 +149,7 @@ export class OrchestrationEngine {
                 decision,
                 previousStatus,
                 newStatus: newState.status,
-                newVersion: newState.version,
+                nextTick: newState.state.tick,
                 command: command ?? undefined,
                 timestamp: new Date(),
             };
@@ -189,38 +187,25 @@ export class OrchestrationEngine {
      * 
      * @private
      */
-    private async loadWorkflowState(workflowId: string): Promise<WorkflowState | null> {
-        // TODO: Replace with actual Prisma query
-        // This is a stub that returns mock data
-
+    private async loadWorkflow(workflowId: string): Promise<WorkflowState> {
         logger.debug({ workflowId }, '[Engine] Loading workflow state');
 
-        // In production:
-        // const workflow = await this.prisma.workflow.findUnique({
-        //   where: { id: workflowId },
-        //   include: { state: true, history: true }
-        // });
-        //
-        // return this.mapToWorkflowState(workflow);
+        const workflow = await this.prisma.workflow.findUnique({
+            where: { id: workflowId },
+            include: {
+                state: true,
+                plan: true,
+                history: {
+                    orderBy: { sequence: 'asc' }
+                }
+            }
+        });
 
-        // Mock for now
-        return {
-            id: workflowId,
-            status: 'CREATED',
-            goal: 'Deploy application',
-            traceId: 'trace-123',
-            environment: 'production',
-            plan: null,
-            lastAgentResult: null,
-            retryCount: 0,
-            maxRetries: 3,
-            errors: [],
-            metadata: {},
-            version: 1,
-            lastHistorySeq: 0,
-            createdAt: Date.now(),
-            updatedAt: Date.now(),
-        };
+        if (!workflow || !workflow.state) {
+            throw new Error(`Workflow ${workflowId} not found or missing state`);
+        }
+
+        return workflow as WorkflowState;
     }
 
     /**
@@ -229,51 +214,77 @@ export class OrchestrationEngine {
      * @private
      */
     private async persistState(
-        state: WorkflowState,
-        decision: any,
+        oldState: WorkflowState,
+        newState: WorkflowState,
+        decision: Decision,
         event: WorkflowEvent
     ): Promise<void> {
         logger.debug(
-            { workflowId: state.id, version: state.version },
+            { workflowId: newState.id, tick: newState.state.tick },
             '[Engine] Persisting state'
         );
 
-        // TODO: Replace with actual Prisma transaction
-        // This is a stub
+        await this.prisma.$transaction(async (tx) => {
+            // 1. Update Workflow status and timestamps
+            const workflowData: any = {
+                status: newState.status,
+                updatedAt: newState.updatedAt,
+            };
 
-        // In production:
-        // await this.prisma.$transaction(async (tx) => {
-        //   await tx.workflow.update({
-        //     where: { id: state.id },
-        //     data: {
-        //       status: state.status,
-        //       version: state.version,
-        //       updatedAt: new Date(state.updatedAt)
-        //     }
-        //   });
-        //
-        //   await tx.workflowState.upsert({
-        //     where: { workflowId: state.id },
-        //     create: { ... },
-        //     update: { ... }
-        //   });
-        //
-        //   await tx.workflowHistory.create({
-        //     data: {
-        //       workflowId: state.id,
-        //       sequence: state.lastHistorySeq,
-        //       previousStatus: ...,
-        //       newStatus: state.status,
-        //       eventType: event.type,
-        //       eventData: event,
-        //       decision: decision,
-        //       reason: decision.reason || decision.error
-        //     }
-        //   });
-        // });
+            if (isTerminal(newState.status)) {
+                workflowData.completedAt = new Date();
+            } else if (oldState.status === 'CREATED' && newState.status !== 'CREATED') {
+                workflowData.startedAt = new Date();
+            }
+
+            await tx.workflow.update({
+                where: { id: newState.id },
+                data: workflowData
+            });
+
+            // 2. Update WorkflowState
+            await tx.workflowState.update({
+                where: { workflowId: newState.id },
+                data: {
+                    retryCount: newState.state.retryCount,
+                    errors: newState.state.errors,
+                    tick: newState.state.tick,
+                    lastHistorySeq: newState.state.lastHistorySeq,
+                    lastAgentResult: newState.state.lastAgentResult || undefined,
+                    updatedAt: newState.state.updatedAt,
+                }
+            });
+
+            // 3. Update WorkflowPlan if it exists and has changed
+            // We assume evaluate/applyDecision might have updated step statuses
+            if (newState.plan) {
+                await tx.workflowPlan.update({
+                    where: { workflowId: newState.id },
+                    data: {
+                        plan: newState.plan.plan as any
+                    }
+                });
+            }
+
+            // 4. Create History record
+            await tx.workflowHistory.create({
+                data: {
+                    workflowId: newState.id,
+                    sequence: newState.state.lastHistorySeq,
+                    previousStatus: oldState.status,
+                    newStatus: newState.status,
+                    eventType: event.type,
+                    eventData: event as any,
+                    decision: decision.type,
+                    reason: (decision as any).reason || (decision as any).error || 'No reason provided',
+                    decisionInput: event as any,
+                    decisionOutput: decision as any,
+                }
+            });
+        });
 
         logger.info(
-            { workflowId: state.id, status: state.status },
+            { workflowId: newState.id, status: newState.status },
             '[Engine] State persisted'
         );
     }

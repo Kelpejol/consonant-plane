@@ -1,20 +1,9 @@
-/**
- * @fileoverview Core Type Definitions for Table-Driven Orchestration
- * @module orchestrator/types
- * 
- * @description
- * Pure data structures for deterministic workflow orchestration.
- * Zero runtime dependencies. All types are serializable to JSON.
- * 
- * @architecture
- * - No classes, only interfaces and types
- * - All types JSON-serializable
- * - Immutable by design (readonly)
- * - Event sourcing compatible
- * 
- * @author Terra Infrastructure Team
- * @version 2.0.0 (Table-Driven)
- */
+import type {
+  Workflow as PrismaWorkflow,
+  WorkflowState as PrismaWorkflowState,
+  WorkflowPlan as PrismaWorkflowPlan,
+  WorkflowHistory,
+} from '@prisma/client';
 
 // ============================================================================
 // WORKFLOW STATUS
@@ -30,15 +19,9 @@
  * 2. Add to Prisma schema
  * 3. Add transitions in transition table
  */
-export type WorkflowStatus =
-  | 'CREATED'
-  | 'WAITING_ON_PLANNER'
-  | 'WAITING_ON_POLICY'
-  | 'WAITING_ON_AGENT'
-  | 'WAITING_ON_HUMAN'
-  | 'PAUSED'
-  | 'COMPLETED'
-  | 'FAILED';
+import { WorkflowStatus } from '@prisma/client';
+import { ConsonantEvents } from '../inngest/events.js';
+export { WorkflowStatus };
 
 /**
  * Terminal statuses that end workflow execution
@@ -222,57 +205,17 @@ export interface AgentResult {
 }
 
 /**
- * Complete workflow state
+ * Complete workflow state (Single Source of Truth)
  * 
  * @description
- * This is the single source of truth.
- * Everything needed to make decisions must be here.
- * This structure must be JSON-serializable.
+ * This is a composite type that represents the full workflow state
+ * as fetched from the database with all relations included.
  */
-export interface WorkflowState {
-  /** Primary key */
-  readonly id: string;
-  
-  /** Current status */
-  status: WorkflowStatus;
-  
-  /** User's goal */
-  readonly goal: string;
-  
-  /** Distributed trace ID */
-  readonly traceId: string;
-  
-  /** Execution environment */
-  readonly environment: string;
-  
-  /** Current execution plan */
-  plan: WorkflowPlan | null;
-  
-  /** Latest agent result */
-  lastAgentResult: AgentResult | null;
-  
-  /** Retry counter */
-  retryCount: number;
-  
-  /** Maximum retries allowed */
-  readonly maxRetries: number;
-  
-  /** Accumulated errors */
-  errors: readonly string[];
-  
-  /** Additional metadata */
-  metadata: Record<string, unknown>;
-  
-  /** Version for optimistic locking */
-  version: number;
-  
-  /** Last processed event sequence */
-  lastHistorySeq: number;
-  
-  /** Timestamps */
-  readonly createdAt: number;
-  updatedAt: number;
-}
+export type WorkflowState = PrismaWorkflow & {
+  state: PrismaWorkflowState;
+  plan: PrismaWorkflowPlan | null;
+  history: WorkflowHistory[];
+};
 
 // ============================================================================
 // DERIVED FACTS
@@ -291,25 +234,25 @@ export interface WorkflowState {
 export interface DerivedFacts {
   /** Has a plan been generated */
   readonly hasPlan: boolean;
-  
+
   /** Are there remaining steps to execute */
   readonly hasRemainingSteps: boolean;
-  
+
   /** Did last agent execution fail */
   readonly lastStepFailed: boolean;
-  
+
   /** Have we exceeded retry limit */
   readonly retriesExhausted: boolean;
-  
+
   /** Is policy evaluation required */
   readonly needsPolicyEvaluation: boolean;
-  
+
   /** Current step index (if executing) */
   readonly currentStepIndex: number;
-  
+
   /** Total number of steps */
   readonly totalSteps: number;
-  
+
   /** All steps completed */
   readonly allStepsCompleted: boolean;
 }
@@ -319,13 +262,10 @@ export interface DerivedFacts {
 // ============================================================================
 
 /**
- * Workflow specific Command to be emitted 
+ * Command to be emitted 
  */
-export interface WorkflowCommand {
-  readonly type:'workflow.planner-generate' | 
-                'workflow.policy-evaluate' | 
-                'workflow.agent-execute' | 
-                'workflow.human-request-approval';
+export interface Command {
+  readonly type: keyof ConsonantEvents;
   readonly payload: Record<string, unknown>;
 }
 
@@ -345,7 +285,7 @@ export type DecisionType =
 export interface EmitCommandDecision {
   readonly type: 'EMIT_COMMAND';
   readonly nextStatus: WorkflowStatus;
-  readonly command: WorkflowCommand;
+  readonly command: Command;
   readonly reason: string;
 }
 
@@ -408,13 +348,13 @@ export type Decision =
 export interface EvalContext {
   /** Current workflow state */
   readonly state: WorkflowState;
-  
+
   /** Event being processed */
   readonly event: WorkflowEvent;
-  
+
   /** Derived facts (computed once) */
   readonly facts: DerivedFacts;
-  
+
   /** Replay mode flag */
   readonly replay?: boolean;
 }
@@ -439,10 +379,10 @@ export type GuardFunction = (facts: DerivedFacts) => boolean;
 export interface TransitionRule {
   /** When this guard returns true */
   readonly when: GuardFunction;
-  
+
   /** Execute this decision function */
   readonly decide: DecisionFunction;
-  
+
   /** Human-readable description */
   readonly description?: string;
 }
@@ -471,22 +411,22 @@ export type TransitionTable = {
 export interface OrchestrationResult {
   /** Workflow ID */
   readonly workflowId: string;
-  
+
   /** Decision made */
   readonly decision: Decision;
-  
+
   /** Previous status */
   readonly previousStatus: WorkflowStatus;
-  
+
   /** New status (after applying decision) */
   readonly newStatus: WorkflowStatus;
-  
-  /** New state version */
-  readonly newVersion: number;
-  
+
+  /** Next tick */
+  readonly nextTick: number;
+
   /** Command to emit (if any) */
-  readonly command?: WorkflowCommand;
-  
+  readonly command?: Command;
+
   /** Timestamp */
   readonly timestamp: Date;
 }
@@ -528,7 +468,7 @@ export function pause(reason: string): PauseDecision {
  */
 export function emitCommandDecision(
   nextStatus: WorkflowStatus,
-  command: WorkflowCommand,
+  command: Command,
   reason: string
 ): EmitCommandDecision {
   return { type: 'EMIT_COMMAND', nextStatus, command, reason };

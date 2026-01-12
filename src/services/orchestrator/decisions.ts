@@ -58,7 +58,6 @@ export function decideNeedsPlanning(ctx: EvalContext): EmitCommandDecision {
       type: 'workflow.planner-generate',
       payload: {
         goal: ctx.state.goal,
-        environment: ctx.state.environment,
         traceId: ctx.state.traceId,
       },
     },
@@ -74,7 +73,7 @@ export function decideNeedsPlanning(ctx: EvalContext): EmitCommandDecision {
  */
 export function decideApplyPlan(ctx: EvalContext): EmitCommandDecision {
   const event = ctx.event as PlannerCompletedEvent;
-  
+
   return emitCommandDecision(
     'WAITING_ON_POLICY',
     {
@@ -96,21 +95,21 @@ export function decideApplyPlan(ctx: EvalContext): EmitCommandDecision {
  */
 export function decidePlannerFailureRetry(ctx: EvalContext): Decision {
   const event = ctx.event as PlannerFailedEvent;
-  
+
   if (!event.retryable || ctx.facts.retriesExhausted) {
     return fail(`Planner failed: ${event.error}`);
   }
-  
+
   return emitCommandDecision(
     'CREATED',
     {
       type: 'workflow.planner-generate',
       payload: {
         goal: ctx.state.goal,
-        retryCount: ctx.state.retryCount,
+        retryCount: ctx.state.state.retryCount,
       },
     },
-    `Retrying plan generation (attempt ${ctx.state.retryCount + 1})`
+    `Retrying plan generation (attempt ${ctx.state.state.retryCount + 1})`
   );
 }
 
@@ -136,7 +135,7 @@ export function decidePlannerFailure(ctx: EvalContext): Decision {
  */
 export function decidePolicyApproved(ctx: EvalContext): Decision {
   const event = ctx.event as PolicyCompletedEvent;
-  
+
   switch (event.result) {
     case 'passed':
       // Policy passed - proceed to execution
@@ -146,18 +145,18 @@ export function decidePolicyApproved(ctx: EvalContext): Decision {
           type: 'workflow.agent-execute',
           payload: {
             workflowId: ctx.state.id,
-            plan: ctx.state.plan,
+            plan: ctx.state.plan?.plan,
             stepIndex: ctx.facts.currentStepIndex,
             traceId: ctx.state.traceId,
           },
         },
         'Policy approved, starting execution'
       );
-    
+
     case 'needs_approval':
       // Policy requires human approval
       return decideNeedsHumanApproval(ctx);
-    
+
     case 'failed':
       // Policy failed - terminate workflow
       const violations = event.violations?.join(', ') || 'Unknown violations';
@@ -178,7 +177,7 @@ export function decideNeedsHumanApproval(ctx: EvalContext): EmitCommandDecision 
       type: 'workflow.human-request-approval',
       payload: {
         workflowId: ctx.state.id,
-        plan: ctx.state.plan,
+        plan: ctx.state.plan?.plan,
         reason: 'Policy requires manual approval',
         traceId: ctx.state.traceId,
       },
@@ -204,7 +203,7 @@ export function decideExecuteNextStep(ctx: EvalContext): EmitCommandDecision {
       type: 'workflow.agent-execute',
       payload: {
         workflowId: ctx.state.id,
-        plan: ctx.state.plan,
+        plan: ctx.state.plan?.plan,
         stepIndex: ctx.facts.currentStepIndex,
         traceId: ctx.state.traceId,
       },
@@ -222,12 +221,12 @@ export function decideExecuteNextStep(ctx: EvalContext): EmitCommandDecision {
  */
 export function decideAgentCompleted(ctx: EvalContext): Decision {
   const event = ctx.event as AgentCompletedEvent;
-  
+
   // Check if all steps are completed
   if (ctx.facts.allStepsCompleted) {
     return complete('All workflow steps completed successfully');
   }
-  
+
   // Continue to next step
   return emitCommandDecision(
     'WAITING_ON_AGENT',
@@ -235,7 +234,7 @@ export function decideAgentCompleted(ctx: EvalContext): Decision {
       type: 'workflow.agent-execute',
       payload: {
         workflowId: ctx.state.id,
-        plan: ctx.state.plan,
+        plan: ctx.state.plan?.plan,
         stepIndex: ctx.facts.currentStepIndex + 1,
         lastResult: event.result,
         traceId: ctx.state.traceId,
@@ -253,24 +252,24 @@ export function decideAgentCompleted(ctx: EvalContext): Decision {
  */
 export function decideAgentFailureRetry(ctx: EvalContext): Decision {
   const event = ctx.event as AgentFailedEvent;
-  
+
   if (!event.retryable || ctx.facts.retriesExhausted) {
     return fail(`Agent execution failed: ${event.error}`);
   }
-  
+
   return emitCommandDecision(
     'WAITING_ON_AGENT',
     {
       type: 'workflow.agent-execute',
       payload: {
         workflowId: ctx.state.id,
-        plan: ctx.state.plan,
+        plan: ctx.state.plan?.plan,
         stepIndex: ctx.facts.currentStepIndex,
-        retryCount: ctx.state.retryCount,
+        retryCount: ctx.state.state.retryCount,
         traceId: ctx.state.traceId,
       },
     },
-    `Retrying agent execution (attempt ${ctx.state.retryCount + 1})`
+    `Retrying agent execution (attempt ${ctx.state.state.retryCount + 1})`
   );
 }
 
@@ -299,7 +298,7 @@ export function decideHumanApproved(ctx: EvalContext): EmitCommandDecision {
       type: 'workflow.agent-execute',
       payload: {
         workflowId: ctx.state.id,
-        plan: ctx.state.plan,
+        plan: ctx.state.plan?.plan,
         stepIndex: ctx.facts.currentStepIndex,
         traceId: ctx.state.traceId,
       },
@@ -367,7 +366,7 @@ export function decideComplete(ctx: EvalContext): Decision {
  * Fail workflow permanently
  */
 export function decideFail(ctx: EvalContext): Decision {
-  const lastError = ctx.state.errors[ctx.state.errors.length - 1];
+  const lastError = ctx.state.state.errors[ctx.state.state.errors.length - 1];
   return fail(lastError || 'Workflow failed');
 }
 
@@ -419,30 +418,30 @@ export const decisions = {
   decideApplyPlan,
   decidePlannerFailureRetry,
   decidePlannerFailure,
-  
+
   // Policy
   decidePolicyApproved,
   decideNeedsHumanApproval,
-  
+
   // Agent Execution
   decideExecuteNextStep,
   decideAgentCompleted,
   decideAgentFailureRetry,
   decideAgentFailure,
-  
+
   // Human Approval
   decideHumanApproved,
   decideHumanRejected,
-  
+
   // Control Flow
   decidePause,
   decideResume,
   decideCancel,
-  
+
   // Completion
   decideComplete,
   decideFail,
-  
+
   // No-Op
   decideNoOp,
   decideDuplicate,
